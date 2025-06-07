@@ -4,6 +4,7 @@ const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 const KonfliktDokumentation = require('../models/KonfliktDokumentation');
 const Anfrage = require('../models/Anfrage'); // für Populate
 const Slot = require('../models/Slot'); // Benötigt, um Slot.VerweisAufTopf zu prüfen
+const KonfliktGruppe = require('../models/KonfliktGruppe');
 
 
 // Diese Funktion vergleicht, ob alle IDs der Anfragen identisch sind.
@@ -24,7 +25,7 @@ function sindObjectIdArraysGleich(arr1, arr2) {
         }
     }
     return true;
-}
+};
 
 // HILFSFUNKTION 
 /**
@@ -67,6 +68,400 @@ async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, au
         console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
     }
     return anfrageDoc;
+};
+
+// HILFSFUNKTION zum Erstellen/Aktualisieren von Konfliktgruppen
+async function aktualisiereKonfliktGruppen() {
+    console.log("Starte Synchronisation der Konfliktgruppen...");
+    
+    try {
+        // 1. Finde alle Konfliktdokumente, die noch nicht final gelöst sind
+        const relevanteKonflikte = await KonfliktDokumentation.find({ 
+            status: { $nin: ['geloest', 'eskaliert'] } 
+        }).select('beteiligteAnfragen');
+
+        const gruppenMap = new Map();
+
+        // 2. Gruppiere die Konflikte in-memory nach der exakten Zusammensetzung der beteiligten Anfragen
+        for (const konflikt of relevanteKonflikte) {
+            if (!konflikt.beteiligteAnfragen || konflikt.beteiligteAnfragen.length === 0) continue;
+            
+            const anfrageIdsStrings = konflikt.beteiligteAnfragen.map(a => a.toString()).sort();
+            const gruppenSchluessel = anfrageIdsStrings.join('#');
+            
+            if (!gruppenMap.has(gruppenSchluessel)) {
+                gruppenMap.set(gruppenSchluessel, {
+                    beteiligteAnfragen: konflikt.beteiligteAnfragen,
+                    konflikteInGruppe: []
+                });
+            }
+            gruppenMap.get(gruppenSchluessel).konflikteInGruppe.push(konflikt._id);
+        }
+
+        // 3. Führe für jede gefundene Gruppe ein "Upsert" (Update or Insert) in der DB durch
+        for (const [gruppenSchluessel, gruppe] of gruppenMap.entries()) {
+            await KonfliktGruppe.findOneAndUpdate(
+                { gruppenSchluessel: gruppenSchluessel }, // Finde Gruppe mit diesem eindeutigen Schlüssel
+                { 
+                    $set: { // Setze/Aktualisiere diese Felder immer
+                        beteiligteAnfragen: gruppe.beteiligteAnfragen,
+                        konflikteInGruppe: gruppe.konflikteInGruppe
+                    },
+                    $setOnInsert: { // Nur beim erstmaligen Erstellen setzen
+                        status: 'offen' 
+                    }
+                },
+                { upsert: true, new: true }
+            );
+        }        
+
+        console.log(`Synchronisation abgeschlossen. ${gruppenMap.size} Konfliktgruppen in der DB.`);
+    } catch (err) {
+        console.error("Fehler bei der Synchronisation der Konfliktgruppen:", err);
+        // Dieser Fehler sollte das Ergebnis des Hauptprozesses nicht unbedingt blockieren, aber geloggt werden.
+    }
+};
+
+/**
+ * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
+ * in der Phase "Verzicht/Verschub". Modifiziert Dokumente im Speicher.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
+ * @param {Array} listeAnfragenMitVerzicht - Array von Anfrage-IDs.
+ * @param {Array} listeAnfragenVerschubKoordination - Array von {anfrage, details} Objekten.
+ * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten, die gespeichert werden müssen.
+ */
+async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
+    const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
+    let anfragenToSave = new Map(); // Sammelt modifizierte Anfrage-Dokumente, um doppeltes Speichern zu vermeiden
+
+    // Verzicht verarbeiten
+    if (listeAnfragenMitVerzicht && Array.isArray(listeAnfragenMitVerzicht)) {
+        konflikt.ListeAnfragenMitVerzicht = listeAnfragenMitVerzicht.map(item => 
+            typeof item === 'string' ? item : item.anfrage || item._id || item
+        );
+        konflikt.markModified('ListeAnfragenMitVerzicht');
+        for (const anfrageId of konflikt.ListeAnfragenMitVerzicht) {
+            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_verzichtet', ausloesenderTopfId);
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+    }
+
+    // Verschub/Koordination verarbeiten
+    if (listeAnfragenVerschubKoordination && Array.isArray(listeAnfragenVerschubKoordination)) {
+        konflikt.ListeAnfragenVerschubKoordination = listeAnfragenVerschubKoordination; // Erwartet [{anfrage, details}]
+        konflikt.markModified('ListeAnfragenVerschubKoordination');
+        for (const item of konflikt.ListeAnfragenVerschubKoordination) {
+            // Annahme: 'abgelehnt_topf_verschoben' für DIESEN Konfliktpunkt, da die Anfrage eine Alternative hat
+            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(item.anfrage, 'abgelehnt_topf_verschoben', ausloesenderTopfId);
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+    }
+
+    // Aktive Anfragen für diesen Konflikt ermitteln (die nicht verzichtet oder verschoben wurden)
+    const anfragenIdsMitVerzicht = new Set((konflikt.ListeAnfragenMitVerzicht || []).map(id => id.toString()));
+    const anfragenIdsMitVerschub = new Set((konflikt.ListeAnfragenVerschubKoordination || []).map(item => item.anfrage.toString()));
+        
+    const aktiveAnfragenImKonflikt = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
+        !anfragenIdsMitVerzicht.has(anfrageDoc._id.toString()) && 
+        !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
+    );
+
+    // Prüfen, ob Kapazität nun ausreicht
+    const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+    if (aktiveAnfragenImKonflikt.length <= maxKap) {
+        konflikt.zugewieseneAnfragen = aktiveAnfragenImKonflikt.map(a => a._id);
+        // Alte Resolution-Felder für Entgelt/Höchstpreis zurücksetzen, falls dies eine neue Lösung ist
+        konflikt.abgelehnteAnfragenEntgeltvergleich = [];
+        konflikt.abgelehnteAnfragenHoechstpreis = [];
+        konflikt.ReihungEntgelt = [];
+        konflikt.ListeGeboteHoechstpreis = [];
+        
+        konflikt.status = 'geloest';
+        konflikt.abschlussdatum = new Date();
+        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub automatisch gelöst.`;
+
+        for (const anfrageDoc of aktiveAnfragenImKonflikt) {
+            const updatedAnfrage =  await updateAnfrageSlotsStatusFuerTopf(anfrageDoc._id, 'bestaetigt_topf', ausloesenderTopfId);
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            anfrageDoc.markModified
+        }
+        console.log(`Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
+    } else {
+        // Konflikt besteht weiterhin, bereit für Entgeltvergleich
+        konflikt.status = 'in_bearbeitung_entgelt';
+        konflikt.zugewieseneAnfragen = []; // Noch keine finale Zuweisung in diesem Schritt
+        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub nicht gelöst. Nächster Schritt: Entgeltvergleich.`;
+        console.log(`Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
+    }
+    // Alte Resolution-Felder zurücksetzen, falls dies eine neue Lösung ist
+    konflikt.abgelehnteAnfragenEntgeltvergleich = [];
+    konflikt.abgelehnteAnfragenHoechstpreis = [];
+    konflikt.ReihungEntgelt = [];
+    konflikt.ListeGeboteHoechstpreis = [];
+
+    return { anfragenToSave };
+};
+
+/**
+ * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
+ * in der Phase "Entgeltvergleich". Modifiziert Dokumente im Speicher.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
+ * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
+ */
+async function resolveEntgeltvergleichForSingleConflict(konflikt) {
+        const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
+        const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+        let anfragenToSave = new Map();
+
+        // Aktive Anfragen für diesen Konflikt ermitteln (die nicht verzichtet oder verschoben wurden)
+        // Dies basiert auf den bereits im Konfliktdokument gespeicherten Listen
+        const anfragenIdsMitVerzicht = new Set((konflikt.ListeAnfragenMitVerzicht || []).map(id => id.toString()));
+        const anfragenIdsMitVerschub = new Set((konflikt.ListeAnfragenVerschubKoordination || []).map(item => item.anfrage.toString()));
+        
+        const aktiveAnfragenFuerEntgeltvergleich = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
+            !anfragenIdsMitVerzicht.has(anfrageDoc._id.toString()) && 
+            !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
+        );
+        
+        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
+
+        // ReihungEntgelt automatisch erstellen und sortieren
+        konflikt.ReihungEntgelt = aktiveAnfragenFuerEntgeltvergleich
+            .map(anfr => ({
+                anfrage: anfr._id,
+                entgelt: anfr.Entgelt || 0, // Nutze das in der Anfrage gespeicherte Entgelt
+            }))
+            .sort((a, b) => (b.entgelt || 0) - (a.entgelt || 0)); // Absteigend nach Entgelt
+
+        konflikt.ReihungEntgelt.forEach((item, index) => item.rang = index + 1);
+        konflikt.markModified('ReihungEntgelt');
+        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
+
+        // Felder für Zuweisung/Ablehnung zurücksetzen, bevor sie neu befüllt werden
+        konflikt.zugewieseneAnfragen = [];
+        konflikt.abgelehnteAnfragenEntgeltvergleich = [];
+        konflikt.abgelehnteAnfragenHoechstpreis = []; // Sicherstellen, dass dies auch leer ist für diese Phase
+            
+        let aktuelleKapazitaetBelegt = 0;
+        let anfragenFuerHoechstpreis = []; // Sammelt Anfrage-IDs für den Fall eines Gleichstands
+        let letztesAkzeptiertesEntgelt = null;
+        let entgeltGleichstand = 0;
+
+        for (const gereihteAnfrageItem of konflikt.ReihungEntgelt) {
+            const anfrageId = gereihteAnfrageItem.anfrage; // Ist bereits ObjectId
+            const anfrageEntgelt = gereihteAnfrageItem.entgelt;
+
+            if (aktuelleKapazitaetBelegt < maxKap) {
+                // Dieser Block prüft, ob die aktuelle Anfrage noch in die Kapazität passt.
+                // Und ob es einen Gleichstand mit der nächsten gibt, falls dieser die Kapazität sprengen würde.
+                let istGleichstandAnGrenze = false;
+                const anzahlNochZuVergebenderPlaetze = maxKap - aktuelleKapazitaetBelegt;
+                const anzahlKandidatenMitDiesemEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt === anfrageEntgelt && !aktiveAnfragenFuerEntgeltvergleich.find(a => a._id.equals(r.anfrage) && (anfragenIdsMitVerzicht.has(a._id.toString()) || anfragenIdsMitVerschub.has(a._id.toString()))) ).length;
+
+
+                if (anzahlKandidatenMitDiesemEntgelt > anzahlNochZuVergebenderPlaetze && anfrageEntgelt === gereihteAnfrageItem.entgelt) {
+                     // Mehr Kandidaten mit diesem Entgelt als freie Plätze -> Alle mit diesem Entgelt gehen in Höchstpreis
+                    istGleichstandAnGrenze = true;
+                    entgeltGleichstand = anfrageEntgelt;
+                }
+
+                if (istGleichstandAnGrenze) {
+                    konflikt.ReihungEntgelt.filter(r => r.entgelt === anfrageEntgelt).forEach(rAnfrage => {
+                         if (!anfragenFuerHoechstpreis.some(id => id.equals(rAnfrage.anfrage))) {
+                            anfragenFuerHoechstpreis.push(rAnfrage.anfrage);
+                        }
+                    });
+                    // Da alle mit diesem Entgelt in HP gehen, werden hier keine weiteren Plätze belegt
+                    // und wir können die Schleife für dieses Entgelt-Niveau beenden bzw. die nächsten nur noch ablehnen.
+                    // Also: wir brechen hier nicht ab, sondern lassen die untere Logik die Ablehnung machen
+
+                } else { //max Kapazität noch nicht erreicht
+                    if(anfrageEntgelt >= entgeltGleichstand) { //freier Platz wird belegt
+                        konflikt.zugewieseneAnfragen.push(anfrageId);
+                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
+                        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                        aktuelleKapazitaetBelegt++;
+                        letztesAkzeptiertesEntgelt = anfrageEntgelt; // Merke dir das Entgelt des letzten, der reingepasst hat
+                    }else { // Sonderfall: letzte Plätze sind nur deswegen noch frei weil vorher Anfragen 
+                            // ins Höchstpreisverfahren gegangen sind und um diese freien Plätze konkurrieren
+                            // Die Anfragen mit geringerem Entgelt werden dann abgelehnt
+                        konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageId);
+                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+                        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                    }
+                    
+                }
+            } else { // Kapazität ist voll
+                // Ist diese Anfrage Teil eines Gleichstands mit dem letzten akzeptierten?
+                if (anfrageEntgelt === letztesAkzeptiertesEntgelt && !anfragenFuerHoechstpreis.some(id => id.equals(anfrageId))) {
+                    // Ja, diese Anfrage gehört auch zu den Gleichstandskandidaten
+                    anfragenFuerHoechstpreis.push(anfrageId);
+                } else if (!anfragenFuerHoechstpreis.some(id => id.equals(anfrageId))) { 
+                    // Nein, eindeutig zu niedriges Entgelt oder nicht Teil des Gleichstands -> Ablehnung
+                    konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageId);
+                    let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+                    if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                }
+            }
+        } // Ende der Schleife durch ReihungEntgelt
+
+        // Entferne die Höchstpreis-Kandidaten aus den regulär Zugewiesenen, falls sie dort gelandet sind
+        if (anfragenFuerHoechstpreis.length > 0) {
+            konflikt.zugewieseneAnfragen = konflikt.zugewieseneAnfragen.filter(
+                zugewiesenId => !anfragenFuerHoechstpreis.some(hpId => hpId.equals(zugewiesenId))
+            );
+        }
+
+        // Setze finalen Status für diesen Schritt
+        if (anfragenFuerHoechstpreis.length > 0) {
+            konflikt.status = 'in_bearbeitung_hoechstpreis';
+            for (const anfrageId of anfragenFuerHoechstpreis) {
+                let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Entgeltvergleich am ${new Date().toLocaleString()} führte zu Gleichstand. Höchstpreisverfahren für ${anfragenFuerHoechstpreis.length} Anfragen eingeleitet.`;
+        } else { // Kein Gleichstand, Konflikt durch Entgelt gelöst
+            konflikt.status = 'geloest';
+            konflikt.abschlussdatum = new Date();
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt durch Entgeltvergleich am ${new Date().toLocaleString()} gelöst.`;
+        }
+        
+        konflikt.markModified('zugewieseneAnfragen');
+        konflikt.markModified('abgelehnteAnfragenEntgeltvergleich');
+
+    return { anfragenToSave };
+};
+
+/**
+ * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
+ * in der Phase "Höchstpreisverfahren". Modifiziert Dokumente im Speicher.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
+ * @param {Array} listeGeboteHoechstpreis - Array von {anfrage, gebot} Objekten aus dem Request.
+ * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
+ */
+async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechstpreis = []) {
+    konflikt.ListeGeboteHoechstpreis = listeGeboteHoechstpreis; // Speichere alle eingegangenen Gebote
+    konflikt.markModified('ListeGeboteHoechstpreis');
+
+    const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
+    let anfragenToSave = new Map();
+
+    // 1. Anfragen identifizieren, die bieten sollten und Gebote validieren
+    const anfragenKandidatenFuerHP = konflikt.beteiligteAnfragen.filter(aDoc => {
+        //console.log(aDoc);
+        // Gib nur Anfragen zurück, bei denen auf einen Höchstpreis gewartet wird
+        for(const slot of aDoc.ZugewieseneSlots){
+            //mindestens 1 Slot wartet auf Höchstpreisentscheidung
+            if(slot.statusEinzelzuweisung === 'wartet_hoechstpreis_topf'){return true;}
+        }
+        return false; // keine der Slots der Anfrage wartet auf Höchtpreisentscheidung
+    });
+
+    let valideGebote = [];
+    let anfragenOhneValidesGebot = [];
+
+    for (const anfrageKandidat of anfragenKandidatenFuerHP) {
+        //console.log(anfrageKandidat);
+        const gebotEingang = listeGeboteHoechstpreis.find(
+            g => g.anfrage && g.anfrage.toString() === anfrageKandidat._id.toString()
+        );
+        if (gebotEingang && typeof gebotEingang.gebot === 'number') {
+            if (gebotEingang.gebot > (anfrageKandidat.Entgelt || 0)) {
+                valideGebote.push({ anfrage: anfrageKandidat._id, gebot: gebotEingang.gebot });
+            } else {
+                anfragenOhneValidesGebot.push(anfrageKandidat._id);
+                const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageKandidat._id, 'abgelehnt_topf_hoechstpreis_ungueltig', ausloesenderTopfId);
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+        } else {
+            anfragenOhneValidesGebot.push(anfrageKandidat._id);
+            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageKandidat._id, 'abgelehnt_topf_hoechstpreis_kein_gebot', ausloesenderTopfId);
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+    }
+    // Füge Anfragen ohne valides Gebot direkt zu den abgelehnten im Konfliktdokument hinzu
+    anfragenOhneValidesGebot.forEach(id => konflikt.abgelehnteAnfragenHoechstpreis.addToSet(id));
+    konflikt.markModified('abgelehnteAnfragenHoechstpreis');
+
+
+    valideGebote.sort((a, b) => (b.gebot || 0) - (a.gebot || 0)); // Absteigend sortieren
+
+    // 2. Verbleibende Kapazität ermitteln
+    const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+    // Anzahl der bereits vor dieser HP-Runde sicher zugewiesenen Anfragen
+    const bereitsSicherZugewieseneAnzahl = konflikt.zugewieseneAnfragen.length;
+    let verbleibendeKapFuerHP = maxKap - bereitsSicherZugewieseneAnzahl;
+    if (verbleibendeKapFuerHP < 0) verbleibendeKapFuerHP = 0;
+
+    let neuZugewiesenInHP = [];
+    let neuAbgelehntInHPWegenKap = [];
+    let verbleibenImWartestatusHP = [];
+
+    console.log(`HP-Runde: maxKap=${maxKap}, bereitsZugewiesen=${bereitsSicherZugewieseneAnzahl}, verbleibend=${verbleibendeKapFuerHP}`);
+    console.log("Valide Gebote sortiert:", valideGebote);
+
+
+    // 3. Valide Gebote verarbeiten
+    for (let i = 0; i < valideGebote.length; i++) {
+        const aktuellesGebot = valideGebote[i];
+        const anfrageId = aktuellesGebot.anfrage;
+
+        if (verbleibendeKapFuerHP > 0) {
+            let istGleichstandAnGrenzeUndUnaufloesbar = false;
+            // Prüfe, ob wir an der Grenze sind und es einen Gleichstand gibt, der nicht alle aufnehmen kann
+            if (valideGebote.filter(g => g.gebot === aktuellesGebot.gebot).length > verbleibendeKapFuerHP && 
+                valideGebote.map(g => g.gebot).lastIndexOf(aktuellesGebot.gebot) >= i + verbleibendeKapFuerHP -1 && // aktuelles Gebot ist Teil der Grenzgruppe
+                valideGebote.map(g => g.gebot).indexOf(aktuellesGebot.gebot) < i + verbleibendeKapFuerHP ) {
+                    istGleichstandAnGrenzeUndUnaufloesbar = true;
+            }
+
+            if (istGleichstandAnGrenzeUndUnaufloesbar) {
+                valideGebote.filter(g => g.gebot === aktuellesGebot.gebot).forEach(gEqual => {
+                    if (!verbleibenImWartestatusHP.some(id => id.equals(gEqual.anfrage))) {
+                        verbleibenImWartestatusHP.push(gEqual.anfrage);
+                    }
+                });
+                verbleibendeKapFuerHP = 0; // Blockiert für diese Runde
+                // Setze i, um die Schleife nach dieser Gleichstandsgruppe fortzusetzen (für Ablehnungen)
+                const naechstesAnderesGebotIndex = valideGebote.findIndex(g => g.gebot < aktuellesGebot.gebot);
+                i = (naechstesAnderesGebotIndex === -1) ? valideGebote.length -1 : naechstesAnderesGebotIndex -1;
+            } else { // Eindeutig gewonnen oder Gleichstand, der noch reinpasst
+                neuZugewiesenInHP.push(anfrageId);
+                const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'bestaetigt_topf_hoechstpreis', ausloesenderTopfId);
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                verbleibendeKapFuerHP--;
+            }
+        } else { // Keine Kapazität mehr
+            if (!verbleibenImWartestatusHP.some(idW => idW.equals(anfrageId))) {
+                neuAbgelehntInHPWegenKap.push(anfrageId);
+                const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_hoechstpreis', ausloesenderTopfId);
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+        }
+    }
+
+    // 4. Konfliktdokument aktualisieren
+    neuZugewiesenInHP.forEach(id => konflikt.zugewieseneAnfragen.addToSet(id));
+    neuAbgelehntInHPWegenKap.forEach(id => konflikt.abgelehnteAnfragenHoechstpreis.addToSet(id));
+        
+    konflikt.markModified('zugewieseneAnfragen');
+    konflikt.markModified('abgelehnteAnfragenHoechstpreis');
+
+    // Finalen Status für diesen Schritt setzen
+    if (verbleibenImWartestatusHP.length > 0) {
+        konflikt.status = 'in_bearbeitung_hoechstpreis'; // Bleibt für nächste Runde
+        konflikt.notizen = `${konflikt.notizen || ''}\nHP-Runde (${new Date().toLocaleString()}): Erneuter Gleichstand für ${verbleibenImWartestatusHP.length} Anfragen. Nächste Bieterrunde erforderlich. Zugewiesen: ${neuZugewiesenInHP.length}, Abgelehnt wg. Kap: ${neuAbgelehntInHPWegenKap.length}, Ungült./Kein Gebot: ${anfragenOhneValidesGebot.length}.`;
+        for (const anfrageId of verbleibenImWartestatusHP) { // Status der Wartenden explizit setzen/bestätigen
+            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+    } else {
+        konflikt.status = 'geloest';
+        konflikt.abschlussdatum = new Date();
+        konflikt.notizen = `${konflikt.notizen || ''}\nKonflikt durch Höchstpreisverfahren am ${new Date().toLocaleString()} gelöst. Zugewiesen: ${neuZugewiesenInHP.length}, Abgelehnt wg. Kap: ${neuAbgelehntInHPWegenKap.length}, Ungült./Kein Gebot: ${anfragenOhneValidesGebot.length}.`;
+    }
+
+    return {anfragenToSave};
 }
 
 // @desc    Identifiziert Überbuchungen in Kapazitätstöpfen und legt Konfliktdokumente an
@@ -129,6 +524,9 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                 toepfeOhneKonflikt.push(topf.TopfID || topf._id);
             }
         }
+
+        await aktualisiereKonfliktGruppen(); // Rufe die Hilfsfunktion auf, um Gruppen zu synchronisieren
+        
 
         res.status(200).json({
             message: 'Konfliktdetektion für Kapazitätstöpfe abgeschlossen.',
@@ -277,64 +675,12 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
             return res.status(400).json({ message: `Konflikt ist im Status '${konflikt.status}' und kann nicht über diesen Endpunkt bearbeitet werden.` });
         }
 
-        const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
-
-        // Verzicht verarbeiten
-        if (ListeAnfragenMitVerzicht && Array.isArray(ListeAnfragenMitVerzicht)) {
-            konflikt.ListeAnfragenMitVerzicht = ListeAnfragenMitVerzicht.map(item => 
-                typeof item === 'string' ? item : item.anfrage || item._id || item
-            );
-            konflikt.markModified('ListeAnfragenMitVerzicht');
-            for (const anfrageId of konflikt.ListeAnfragenMitVerzicht) {
-                await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_verzichtet', ausloesenderTopfId);
-            }
-        }
-
-        // Verschub/Koordination verarbeiten
-        if (ListeAnfragenVerschubKoordination && Array.isArray(ListeAnfragenVerschubKoordination)) {
-            konflikt.ListeAnfragenVerschubKoordination = ListeAnfragenVerschubKoordination; // Erwartet [{anfrage, details}]
-            konflikt.markModified('ListeAnfragenVerschubKoordination');
-            for (const item of konflikt.ListeAnfragenVerschubKoordination) {
-                // Annahme: 'abgelehnt_topf_verschoben' für DIESEN Konfliktpunkt, da die Anfrage eine Alternative hat
-                await updateAnfrageSlotsStatusFuerTopf(item.anfrage, 'abgelehnt_topf_verschoben', ausloesenderTopfId);
-            }
-        }
-
-        // Aktive Anfragen für diesen Konflikt ermitteln (die nicht verzichtet oder verschoben wurden)
-        const anfragenIdsMitVerzicht = new Set((konflikt.ListeAnfragenMitVerzicht || []).map(id => id.toString()));
-        const anfragenIdsMitVerschub = new Set((konflikt.ListeAnfragenVerschubKoordination || []).map(item => item.anfrage.toString()));
-        
-        const aktiveAnfragenImKonflikt = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
-            !anfragenIdsMitVerzicht.has(anfrageDoc._id.toString()) && 
-            !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
+        // Rufe die zentrale Service-Funktion auf
+        const { anfragenToSave } = await resolveVerzichtVerschubForSingleConflict(
+            konflikt,
+            ListeAnfragenMitVerzicht,
+            ListeAnfragenVerschubKoordination
         );
-
-        // Prüfen, ob Kapazität nun ausreicht
-        const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
-        if (aktiveAnfragenImKonflikt.length <= maxKap) {
-            konflikt.zugewieseneAnfragen = aktiveAnfragenImKonflikt.map(a => a._id);
-            // Alte Resolution-Felder für Entgelt/Höchstpreis zurücksetzen, falls dies eine neue Lösung ist
-            konflikt.abgelehnteAnfragenEntgeltvergleich = [];
-            konflikt.abgelehnteAnfragenHoechstpreis = [];
-            konflikt.ReihungEntgelt = [];
-            konflikt.ListeGeboteHoechstpreis = [];
-            
-            konflikt.status = 'geloest';
-            konflikt.abschlussdatum = new Date();
-            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub automatisch gelöst.`;
-
-            for (const anfrageDoc of aktiveAnfragenImKonflikt) {
-                await updateAnfrageSlotsStatusFuerTopf(anfrageDoc._id, 'bestaetigt_topf', ausloesenderTopfId);
-                anfrageDoc.markModified
-            }
-            console.log(`Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
-        } else {
-            // Konflikt besteht weiterhin, bereit für Entgeltvergleich
-            konflikt.status = 'in_bearbeitung_entgelt';
-            konflikt.zugewieseneAnfragen = []; // Noch keine finale Zuweisung in diesem Schritt
-            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub nicht gelöst. Nächster Schritt: Entgeltvergleich.`;
-            console.log(`Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
-        }
         
         // Allgemeine Notizen aus dem Request Body verarbeiten
         if (notizen !== undefined) {
@@ -347,7 +693,13 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
             konflikt.markModified('notizen');
         }
 
-        const aktualisierterKonflikt = await konflikt.save();
+        const aktualisierterKonflikt = await konflikt.save(); // Speichere das Konfliktdokument
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
 
         res.status(200).json({
             message: `Verzicht/Verschub für Konflikt ${konflikt.TopfID || konflikt._id} verarbeitet. Neuer Status: ${aktualisierterKonflikt.status}`,
@@ -366,10 +718,7 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
 // Phase 2 Controller-Funktion
 // @desc    Führt den Entgeltvergleich für einen Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/entgeltvergleich
-exports.fuehreEntgeltvergleichDurch = async (req, res) => {
-    console.log("Starte Entgeltvergleich")
-    console.log(req.params);
-    console.log(req.body);
+exports.fuehreEntgeltvergleichDurch = async (req, res) => {    
     const { konfliktId } = req.params;
     const { notizen, notizenUpdateMode } = req.body || {}; // Nur Notizen werden optional erwartet
 
@@ -394,120 +743,12 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
             return res.status(400).json({ message: `Konflikt ist im Status '${konflikt.status}' und der Entgeltvergleich kann nicht (erneut) durchgeführt werden, ohne ihn ggf. zurückzusetzen.` });
         }
 
-        const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
-        const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+        // Rufe die zentrale Service-Funktion auf
+        const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt);
+       
 
-        // Aktive Anfragen für diesen Konflikt ermitteln (die nicht verzichtet oder verschoben wurden)
-        // Dies basiert auf den bereits im Konfliktdokument gespeicherten Listen
-        const anfragenIdsMitVerzicht = new Set((konflikt.ListeAnfragenMitVerzicht || []).map(id => id.toString()));
-        const anfragenIdsMitVerschub = new Set((konflikt.ListeAnfragenVerschubKoordination || []).map(item => item.anfrage.toString()));
-        
-        const aktiveAnfragenFuerEntgeltvergleich = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
-            !anfragenIdsMitVerzicht.has(anfrageDoc._id.toString()) && 
-            !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
-        );
-        
-        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
+        //#######################################
 
-        // ReihungEntgelt automatisch erstellen und sortieren
-        konflikt.ReihungEntgelt = aktiveAnfragenFuerEntgeltvergleich
-            .map(anfr => ({
-                anfrage: anfr._id,
-                entgelt: anfr.Entgelt || 0, // Nutze das in der Anfrage gespeicherte Entgelt
-            }))
-            .sort((a, b) => (b.entgelt || 0) - (a.entgelt || 0)); // Absteigend nach Entgelt
-
-        konflikt.ReihungEntgelt.forEach((item, index) => item.rang = index + 1);
-        konflikt.markModified('ReihungEntgelt');
-        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
-
-        // Felder für Zuweisung/Ablehnung zurücksetzen, bevor sie neu befüllt werden
-        konflikt.zugewieseneAnfragen = [];
-        konflikt.abgelehnteAnfragenEntgeltvergleich = [];
-        konflikt.abgelehnteAnfragenHoechstpreis = []; // Sicherstellen, dass dies auch leer ist für diese Phase
-            
-        let aktuelleKapazitaetBelegt = 0;
-        let anfragenFuerHoechstpreis = []; // Sammelt Anfrage-IDs für den Fall eines Gleichstands
-        let letztesAkzeptiertesEntgelt = null;
-        let entgeltGleichstand = 0;
-
-        for (const gereihteAnfrageItem of konflikt.ReihungEntgelt) {
-            const anfrageId = gereihteAnfrageItem.anfrage; // Ist bereits ObjectId
-            const anfrageEntgelt = gereihteAnfrageItem.entgelt;
-
-            if (aktuelleKapazitaetBelegt < maxKap) {
-                // Dieser Block prüft, ob die aktuelle Anfrage noch in die Kapazität passt.
-                // Und ob es einen Gleichstand mit der nächsten gibt, falls dieser die Kapazität sprengen würde.
-                let istGleichstandAnGrenze = false;
-                const anzahlNochZuVergebenderPlaetze = maxKap - aktuelleKapazitaetBelegt;
-                const anzahlKandidatenMitDiesemEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt === anfrageEntgelt && !aktiveAnfragenFuerEntgeltvergleich.find(a => a._id.equals(r.anfrage) && (anfragenIdsMitVerzicht.has(a._id.toString()) || anfragenIdsMitVerschub.has(a._id.toString()))) ).length;
-
-
-                if (anzahlKandidatenMitDiesemEntgelt > anzahlNochZuVergebenderPlaetze && anfrageEntgelt === gereihteAnfrageItem.entgelt) {
-                     // Mehr Kandidaten mit diesem Entgelt als freie Plätze -> Alle mit diesem Entgelt gehen in Höchstpreis
-                    istGleichstandAnGrenze = true;
-                    entgeltGleichstand = anfrageEntgelt;
-                }
-
-                if (istGleichstandAnGrenze) {
-                    konflikt.ReihungEntgelt.filter(r => r.entgelt === anfrageEntgelt).forEach(rAnfrage => {
-                         if (!anfragenFuerHoechstpreis.some(id => id.equals(rAnfrage.anfrage))) {
-                            anfragenFuerHoechstpreis.push(rAnfrage.anfrage);
-                        }
-                    });
-                    // Da alle mit diesem Entgelt in HP gehen, werden hier keine weiteren Plätze belegt
-                    // und wir können die Schleife für dieses Entgelt-Niveau beenden bzw. die nächsten nur noch ablehnen.
-                    // Also: wir brechen hier nicht ab, sondern lassen die untere Logik die Ablehnung machen
-
-                } else { //max Kapazität noch nicht erreicht
-                    if(anfrageEntgelt >= entgeltGleichstand) { //freier Platz wird belegt
-                        konflikt.zugewieseneAnfragen.push(anfrageId);
-                        await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
-                        aktuelleKapazitaetBelegt++;
-                        letztesAkzeptiertesEntgelt = anfrageEntgelt; // Merke dir das Entgelt des letzten, der reingepasst hat
-                    }else { // Sonderfall: letzte Plätze sind nur deswegen noch frei weil vorher Anfragen 
-                            // ins Höchstpreisverfahren gegangen sind und um diese freien Plätze konkurrieren
-                            // Die Anfragen mit geringerem Entgelt werden dann abgelehnt
-                        konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageId);
-                        await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
-                    }
-                    
-                }
-            } else { // Kapazität ist voll
-                // Ist diese Anfrage Teil eines Gleichstands mit dem letzten akzeptierten?
-                if (anfrageEntgelt === letztesAkzeptiertesEntgelt && !anfragenFuerHoechstpreis.some(id => id.equals(anfrageId))) {
-                    // Ja, diese Anfrage gehört auch zu den Gleichstandskandidaten
-                    anfragenFuerHoechstpreis.push(anfrageId);
-                } else if (!anfragenFuerHoechstpreis.some(id => id.equals(anfrageId))) { 
-                    // Nein, eindeutig zu niedriges Entgelt oder nicht Teil des Gleichstands -> Ablehnung
-                    konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageId);
-                    await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
-                }
-            }
-        } // Ende der Schleife durch ReihungEntgelt
-
-        // Entferne die Höchstpreis-Kandidaten aus den regulär Zugewiesenen, falls sie dort gelandet sind
-        if (anfragenFuerHoechstpreis.length > 0) {
-            konflikt.zugewieseneAnfragen = konflikt.zugewieseneAnfragen.filter(
-                zugewiesenId => !anfragenFuerHoechstpreis.some(hpId => hpId.equals(zugewiesenId))
-            );
-        }
-
-        // Setze finalen Status für diesen Schritt
-        if (anfragenFuerHoechstpreis.length > 0) {
-            konflikt.status = 'in_bearbeitung_hoechstpreis';
-            for (const anfrageId of anfragenFuerHoechstpreis) {
-                await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
-            }
-            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Entgeltvergleich am ${new Date().toLocaleString()} führte zu Gleichstand. Höchstpreisverfahren für ${anfragenFuerHoechstpreis.length} Anfragen eingeleitet.`;
-        } else { // Kein Gleichstand, Konflikt durch Entgelt gelöst
-            konflikt.status = 'geloest';
-            konflikt.abschlussdatum = new Date();
-            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt durch Entgeltvergleich am ${new Date().toLocaleString()} gelöst.`;
-        }
-        
-        konflikt.markModified('zugewieseneAnfragen');
-        konflikt.markModified('abgelehnteAnfragenEntgeltvergleich');
 
         // Allgemeine Notizen aus dem Request Body verarbeiten
         if (notizen !== undefined) {
@@ -534,13 +775,12 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
     }
 };
 
-
 // Phase 3 Controller-Funktion
 // @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens
 // @route   PUT /api/konflikte/:konfliktId/hoechstpreis-ergebnis
 exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
     const { konfliktId } = req.params;
-    const { ListeGeboteHoechstpreis, notizen, notizenUpdateMode } = req.body;
+    const { ListeGeboteHoechstpreis, notizen, notizenUpdateMode } = req.body || {};
 
     if (!mongoose.Types.ObjectId.isValid(konfliktId)) {
         return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
@@ -564,121 +804,15 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
             return res.status(500).json({ message: 'Konfliktdokumentation hat keinen verknüpften Kapazitätstopf.' });
         }
 
-        konflikt.ListeGeboteHoechstpreis = ListeGeboteHoechstpreis; // Speichere alle eingegangenen Gebote
-        konflikt.markModified('ListeGeboteHoechstpreis');
-
-        const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
-
-        // 1. Anfragen identifizieren, die bieten sollten und Gebote validieren
-        const anfragenKandidatenFuerHP = konflikt.beteiligteAnfragen.filter(aDoc => {
-            //console.log(aDoc);
-            // Gib nur Anfragen zurück, bei denen auf einen Höchstpreis gewartet wird
-            for(const slot of aDoc.ZugewieseneSlots){
-                //mindestens 1 Slot wartet auf Höchstpreisentscheidung
-                if(slot.statusEinzelzuweisung === 'wartet_hoechstpreis_topf'){return true;}
-            }
-            return false; // keine der Slots der Anfrage wartet auf Höchtpreisentscheidung
-        });
-
-        let valideGebote = [];
-        let anfragenOhneValidesGebot = [];
-
-        for (const anfrageKandidat of anfragenKandidatenFuerHP) {
-            //console.log(anfrageKandidat);
-            const gebotEingang = ListeGeboteHoechstpreis.find(
-                g => g.anfrage && g.anfrage.toString() === anfrageKandidat._id.toString()
-            );
-
-            if (gebotEingang && typeof gebotEingang.gebot === 'number') {
-                if (gebotEingang.gebot > (anfrageKandidat.Entgelt || 0)) {
-                    valideGebote.push({ anfrage: anfrageKandidat._id, gebot: gebotEingang.gebot });
-                } else {
-                    anfragenOhneValidesGebot.push(anfrageKandidat._id);
-                    await updateAnfrageSlotsStatusFuerTopf(anfrageKandidat._id, 'abgelehnt_topf_hoechstpreis_ungueltig', ausloesenderTopfId);
-                }
-            } else {
-                anfragenOhneValidesGebot.push(anfrageKandidat._id);
-                await updateAnfrageSlotsStatusFuerTopf(anfrageKandidat._id, 'abgelehnt_topf_hoechstpreis_kein_gebot', ausloesenderTopfId);
-            }
-        }
-        // Füge Anfragen ohne valides Gebot direkt zu den abgelehnten im Konfliktdokument hinzu
-        anfragenOhneValidesGebot.forEach(id => konflikt.abgelehnteAnfragenHoechstpreis.addToSet(id));
-        konflikt.markModified('abgelehnteAnfragenHoechstpreis');
+        // Rufe die zentrale Service-Funktion auf
+        const { anfragenToSave } = await resolveHoechstpreisForSingleConflict(konflikt, ListeGeboteHoechstpreis);
 
 
-        valideGebote.sort((a, b) => (b.gebot || 0) - (a.gebot || 0)); // Absteigend sortieren
+        //#######################################
 
-        // 2. Verbleibende Kapazität ermitteln
-        const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
-        // Anzahl der bereits vor dieser HP-Runde sicher zugewiesenen Anfragen
-        const bereitsSicherZugewieseneAnzahl = konflikt.zugewieseneAnfragen.length;
-        let verbleibendeKapFuerHP = maxKap - bereitsSicherZugewieseneAnzahl;
-        if (verbleibendeKapFuerHP < 0) verbleibendeKapFuerHP = 0;
-
-        let neuZugewiesenInHP = [];
-        let neuAbgelehntInHPWegenKap = [];
-        let verbleibenImWartestatusHP = [];
-
-        console.log(`HP-Runde: maxKap=${maxKap}, bereitsZugewiesen=${bereitsSicherZugewieseneAnzahl}, verbleibend=${verbleibendeKapFuerHP}`);
-        console.log("Valide Gebote sortiert:", valideGebote);
-
-
-        // 3. Valide Gebote verarbeiten
-        for (let i = 0; i < valideGebote.length; i++) {
-            const aktuellesGebot = valideGebote[i];
-            const anfrageId = aktuellesGebot.anfrage;
-
-            if (verbleibendeKapFuerHP > 0) {
-                let istGleichstandAnGrenzeUndUnaufloesbar = false;
-                // Prüfe, ob wir an der Grenze sind und es einen Gleichstand gibt, der nicht alle aufnehmen kann
-                if (valideGebote.filter(g => g.gebot === aktuellesGebot.gebot).length > verbleibendeKapFuerHP && 
-                    valideGebote.map(g => g.gebot).lastIndexOf(aktuellesGebot.gebot) >= i + verbleibendeKapFuerHP -1 && // aktuelles Gebot ist Teil der Grenzgruppe
-                    valideGebote.map(g => g.gebot).indexOf(aktuellesGebot.gebot) < i + verbleibendeKapFuerHP ) {
-                        istGleichstandAnGrenzeUndUnaufloesbar = true;
-                }
-
-
-                if (istGleichstandAnGrenzeUndUnaufloesbar) {
-                    valideGebote.filter(g => g.gebot === aktuellesGebot.gebot).forEach(gEqual => {
-                        if (!verbleibenImWartestatusHP.some(id => id.equals(gEqual.anfrage))) {
-                            verbleibenImWartestatusHP.push(gEqual.anfrage);
-                        }
-                    });
-                    verbleibendeKapFuerHP = 0; // Blockiert für diese Runde
-                    // Setze i, um die Schleife nach dieser Gleichstandsgruppe fortzusetzen (für Ablehnungen)
-                    const naechstesAnderesGebotIndex = valideGebote.findIndex(g => g.gebot < aktuellesGebot.gebot);
-                    i = (naechstesAnderesGebotIndex === -1) ? valideGebote.length -1 : naechstesAnderesGebotIndex -1;
-                } else { // Eindeutig gewonnen oder Gleichstand, der noch reinpasst
-                    neuZugewiesenInHP.push(anfrageId);
-                    await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'bestaetigt_topf_hoechstpreis', ausloesenderTopfId);
-                    verbleibendeKapFuerHP--;
-                }
-            } else { // Keine Kapazität mehr
-                if (!verbleibenImWartestatusHP.some(idW => idW.equals(anfrageId))) {
-                    neuAbgelehntInHPWegenKap.push(anfrageId);
-                    await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_hoechstpreis', ausloesenderTopfId);
-                }
-            }
-        }
-
-        // 4. Konfliktdokument aktualisieren
-        neuZugewiesenInHP.forEach(id => konflikt.zugewieseneAnfragen.addToSet(id));
-        neuAbgelehntInHPWegenKap.forEach(id => konflikt.abgelehnteAnfragenHoechstpreis.addToSet(id));
         
-        konflikt.markModified('zugewieseneAnfragen');
-        konflikt.markModified('abgelehnteAnfragenHoechstpreis');
 
-        if (verbleibenImWartestatusHP.length > 0) {
-            konflikt.status = 'in_bearbeitung_hoechstpreis'; // Bleibt für nächste Runde
-            konflikt.notizen = `${konflikt.notizen || ''}\nHP-Runde (${new Date().toLocaleString()}): Erneuter Gleichstand für ${verbleibenImWartestatusHP.length} Anfragen. Nächste Bieterrunde erforderlich. Zugewiesen: ${neuZugewiesenInHP.length}, Abgelehnt wg. Kap: ${neuAbgelehntInHPWegenKap.length}, Ungült./Kein Gebot: ${anfragenOhneValidesGebot.length}.`;
-            for (const anfrageId of verbleibenImWartestatusHP) { // Status der Wartenden explizit setzen/bestätigen
-                await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
-            }
-        } else {
-            konflikt.status = 'geloest';
-            konflikt.abschlussdatum = new Date();
-            konflikt.notizen = `${konflikt.notizen || ''}\nKonflikt durch Höchstpreisverfahren am ${new Date().toLocaleString()} gelöst. Zugewiesen: ${neuZugewiesenInHP.length}, Abgelehnt wg. Kap: ${neuAbgelehntInHPWegenKap.length}, Ungült./Kein Gebot: ${anfragenOhneValidesGebot.length}.`;
-        }
+        //###########################################
 
         // Allgemeine Notizen aus dem Request Body verarbeiten
         if (notizen !== undefined) {
@@ -693,6 +827,12 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
 
         const aktualisierterKonflikt = await konflikt.save();
 
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
         res.status(200).json({
             message: `Höchstpreisverfahren für Konflikt ${konflikt.TopfID || konflikt._id} verarbeitet. Status: ${aktualisierterKonflikt.status}`,
             data: aktualisierterKonflikt
@@ -702,4 +842,320 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
         console.error(`Fehler bei PUT /api/konflikte/${konfliktId}/hoechstpreis-ergebnis:`, error);
         res.status(500).json({ message: 'Serverfehler bei der Verarbeitung des Höchstpreis-Ergebnisses.' });
     }
+};
+
+// @desc    Ruft alle persistierten Konfliktgruppen ab
+// @route   GET /api/konflikte/gruppen
+exports.identifiziereKonfliktGruppen = async (req, res) => {
+    try {
+        // Filtere optional nach Status der Gruppe, z.B. alle, die nicht gelöst sind
+        const filter = { status: { $ne: 'vollstaendig_geloest' } };
+
+        const gruppen = await KonfliktGruppe.find(filter)
+            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Entgelt')
+            .populate({
+                path: 'konflikteInGruppe',
+                select: 'status ausloesenderKapazitaetstopf',
+                populate: {
+                    path: 'ausloesenderKapazitaetstopf',
+                    select: 'TopfID maxKapazitaet'
+                }
+            })
+            .sort({ updatedAt: -1 }); // Die zuletzt bearbeiteten Gruppen zuerst
+
+        res.status(200).json({
+            message: `${gruppen.length} aktive Konfliktgruppen gefunden.`,
+            data: gruppen
+        });
+
+    } catch (error) {
+        console.error('Fehler beim Abrufen der Konfliktgruppen:', error);
+        res.status(500).json({ message: 'Serverfehler beim Abrufen der Gruppen.' });
+    }
+};
+
+// @desc    Verarbeitet Verzichte/Verschiebungen für eine ganze Konfliktgruppe
+// @route   PUT /api/konflikte/gruppen/:gruppenId/verzicht-verschub
+exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
+    const { gruppenId } = req.params;
+    const { ListeAnfragenMitVerzicht, ListeAnfragenVerschubKoordination, notizen, notizenUpdateMode } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) {
+        return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    }
+
+    try {
+        // 1. Lade die Gruppe und alle zugehörigen Daten
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'beteiligteAnfragen',
+                select: '_id Status Entgelt' // Felder, die wir von den Anfragen brauchen
+            })
+            .populate({
+                path: 'konflikteInGruppe', // Lade die einzelnen Konfliktdokumente
+                populate: {
+                    path: 'ausloesenderKapazitaetstopf', // Lade zu jedem Konfliktdokument den Topf
+                    select: 'maxKapazitaet TopfID _id'
+                }
+            });
+
+        if (!gruppe) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        }
+        if (!['offen', 'in_bearbeitung_verzicht'].includes(gruppe.status)) {
+             return res.status(400).json({ message: `Konfliktgruppe ist im Status '${gruppe.status}' und kann nicht bearbeitet werden.` });
+        }
+
+        let alleAnfragenZumSpeichern = new Map();
+        let anzahlOffenerKonflikte = 0;
+
+        // Iteriere durch jeden einzelnen Konflikt der Gruppe
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            // Rufe die zentrale Service-Funktion auf
+            const { anfragenToSave } = await resolveVerzichtVerschubForSingleConflict(
+                konflikt,
+                ListeAnfragenMitVerzicht,
+                ListeAnfragenVerschubKoordination
+            );
+
+            // Füge modifizierte Anfragen zur Map hinzu (Duplikate werden durch Map-Struktur vermieden)
+            anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
+
+            if (konflikt.status !== 'geloest') {
+                anzahlOffenerKonflikte++;
+            }
+             await konflikt.save(); // Speichere die Änderungen am einzelnen Konfliktdokument
+        }
+
+        // Aktualisiere den Gesamtstatus der Gruppe
+        if (anzahlOffenerKonflikte > 0) {
+            gruppe.status = 'in_bearbeitung_entgelt'; //es geht dann weiter mit dem Engeltvergleich
+        } else {
+            gruppe.status = 'vollstaendig_geloest';
+        }
+
+        // Notizen für die Gruppe
+        if (notizen !== undefined) {
+             const notizPrefix = `Gruppen-Notiz vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && gruppe.notizen) {
+                gruppe.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                gruppe.notizen = notizPrefix + notizen;
+            }
+        }
+        
+        const aktualisierteGruppe = await gruppe.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+             await anfrageDoc.updateGesamtStatus();
+             await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Verzicht/Verschub für Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            data: {
+                gruppe: aktualisierteGruppe,
+                zusammenfassung: {
+                    anzahlKonflikteInGruppe: gruppe.konflikteInGruppe.length,
+                    davonGeloest: gruppe.konflikteInGruppe.length - anzahlOffenerKonflikte,
+                    davonOffen: anzahlOffenerKonflikte
+                }
+            }
+        });
+    } catch (error) {
+        console.error(`Fehler bei PUT /api/konflikte/gruppen/${gruppenId}/verzicht-verschub:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
+    }
+};
+
+// @desc    Führt den Entgeltvergleich für eine GANZE Konfliktgruppe durch
+// @route   PUT /api/konflikte/gruppen/:gruppenId/entgeltvergleich
+exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
+    const { gruppenId } = req.params;
+    const { notizen, notizenUpdateMode } = req.body || {};
+    
+    // ... (Validierung und Laden der Gruppe wie in verarbeiteGruppenVerzichtVerschub) ...
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    
+    // 1. Lade die Gruppe und alle zugehörigen Daten
+    const gruppe = await KonfliktGruppe.findById(gruppenId)
+        .populate({
+            path: 'beteiligteAnfragen',
+            select: '_id Status Entgelt' // Felder, die wir von den Anfragen brauchen
+        })
+        .populate({
+            path: 'konflikteInGruppe', // Lade die einzelnen Konfliktdokumente
+            populate: {
+                path: 'ausloesenderKapazitaetstopf', // Lade zu jedem Konfliktdokument den Topf
+                select: 'maxKapazitaet TopfID _id'
+            }
+        });
+        
+    if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+
+    try {
+        let alleAnfragenZumSpeichern = new Map();
+        let anzahlOffenerKonflikte = 0;
+
+        // Iteriere durch jeden einzelnen Konflikt der Gruppe
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            // Rufe die zentrale Service-Funktion auf
+            const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt);
+
+            // Füge modifizierte Anfragen zur Map hinzu
+            anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
+
+            if (konflikt.status !== 'geloest') {
+                anzahlOffenerKonflikte++;
+            }
+            await konflikt.save();
+        }
+
+        // Aktualisiere den Gesamtstatus der Gruppe
+        if (anzahlOffenerKonflikte > 0) {
+            // Wenn mindestens ein Konflikt zum HP-Verfahren übergeht, ist die Gruppe auch in diesem Status
+            const hatHPVerfahren = gruppe.konflikteInGruppe.some(k => k.status === 'in_bearbeitung_hoechstpreis');
+            gruppe.status = hatHPVerfahren ? 'in_bearbeitung_hoechstpreis' : 'teilweise_geloest';
+        } else {
+            gruppe.status = 'vollstaendig_geloest';
+        }
+        
+        // Notizen für die Gruppe
+        if (notizen !== undefined) {
+             const notizPrefix = `Gruppen-Notiz vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && gruppe.notizen) {
+                gruppe.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                gruppe.notizen = notizPrefix + notizen;
+            }
+        }
+        
+        const aktualisierteGruppe = await gruppe.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Entgeltvergleich für Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            data: {
+                gruppe: aktualisierteGruppe,
+                zusammenfassung: {
+                    anzahlKonflikteInGruppe: gruppe.konflikteInGruppe.length,
+                    davonGeloest: gruppe.konflikteInGruppe.length - anzahlOffenerKonflikte,
+                    davonOffen: anzahlOffenerKonflikte
+                }
+            }
+        });
+
+    } catch (error) { 
+        console.error(`Fehler bei PUT /api/konflikte/gruppen/${gruppenId}/entgeltvergleich:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
+    }
+};
+
+// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens für eine GANZE Konfliktgruppe
+// @route   PUT /api/konflikte/gruppen/:gruppenId/hoechstpreis-ergebnis
+exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
+    const { gruppenId } = req.params;
+    const { ListeGeboteHoechstpreis, notizen, notizenUpdateMode } = req.body || {};
+    
+    // ... (Validierung und Laden der Gruppe wie in verarbeiteGruppenVerzichtVerschub) ...
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    
+    // 1. Lade die Gruppe und alle zugehörigen Daten
+    const gruppe = await KonfliktGruppe.findById(gruppenId)
+        .populate({
+            path: 'beteiligteAnfragen',
+            select: '_id Status Entgelt' // Felder, die wir von den Anfragen brauchen
+        })
+        .populate({
+            path: 'konflikteInGruppe', // Lade die einzelnen Konfliktdokumente
+            populate: {
+                path: 'ausloesenderKapazitaetstopf', // Lade zu jedem Konfliktdokument den Topf
+                select: 'maxKapazitaet TopfID _id'
+            }
+        });
+
+    if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+    if (gruppe.status !== 'in_bearbeitung_hoechstpreis') {
+        return res.status(400).json({ message: `Konfliktgruppe hat Status '${gruppe.status}' und erwartet keine Höchstpreis-Ergebnisse.`});
+    }
+
+    try {
+        let alleAnfragenZumSpeichern = new Map();
+        let anzahlOffenerKonflikte = 0;
+
+        // Iteriere durch jeden einzelnen Konflikt der Gruppe
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            if (konflikt.status !== 'in_bearbeitung_hoechstpreis') continue; // Überspringe ggf. schon gelöste Töpfe in der Gruppe
+
+            // Rufe die zentrale Service-Funktion auf
+            // Übergebe nur die Gebote, die für die Kandidaten dieses Konflikts relevant sind
+            const kandidatenIdsDiesesKonflikts = konflikt.beteiligteAnfragen
+                .filter(a => a.Status === 'wartet_hoechstpreis')
+                .map(a => a._id.toString());
+            
+            const relevanteGeboteFuerDiesenKonflikt = (ListeGeboteHoechstpreis || []).filter(g =>
+                kandidatenIdsDiesesKonflikts.includes(g.anfrage.toString())
+            );
+
+            const { anfragenToSave } = await resolveHoechstpreisForSingleConflict(
+                konflikt,
+                relevanteGeboteFuerDiesenKonflikt
+            );
+
+            // Füge modifizierte Anfragen zur Map hinzu
+            anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
+
+            if (konflikt.status !== 'geloest') {
+                anzahlOffenerKonflikte++;
+            }
+            await konflikt.save();
+        }
+
+        // Aktualisiere den Gesamtstatus der Gruppe
+        if (anzahlOffenerKonflikte > 0) {
+            gruppe.status = 'in_bearbeitung_hoechstpreis'; // Wenn mind. ein Konflikt noch unentschieden ist
+        } else {
+            gruppe.status = 'vollstaendig_geloest';
+        }
+        
+        // Notizen für die Gruppe
+        if (notizen !== undefined) {
+             const notizPrefix = `Gruppen-Notiz vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && gruppe.notizen) {
+                gruppe.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                gruppe.notizen = notizPrefix + notizen;
+            }
+        }
+        
+        const aktualisierteGruppe = await gruppe.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Höchstpreisverfahren für Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            data: {
+                gruppe: aktualisierteGruppe,
+                zusammenfassung: {
+                    anzahlKonflikteInGruppe: gruppe.konflikteInGruppe.length,
+                    davonGeloest: gruppe.konflikteInGruppe.length - anzahlOffenerKonflikte,
+                    davonOffen: anzahlOffenerKonflikte
+                }
+            }
+        });
+
+    } catch (error) { 
+        console.error(`Fehler bei PUT /api/konflikte/gruppen/${gruppenId}/hoechstpreis-ergebnis:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
+     }
 };
