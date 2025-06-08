@@ -209,6 +209,7 @@ async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenM
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
  */
 async function resolveEntgeltvergleichForSingleConflict(konflikt) {
+        //console.log(konflikt);
         const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
         const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
         let anfragenToSave = new Map();
@@ -223,7 +224,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
             !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
         );
         
-        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
+        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.\n ${aktiveAnfragenFuerEntgeltvergleich}`);
 
         // ReihungEntgelt automatisch erstellen und sortieren
         konflikt.ReihungEntgelt = aktiveAnfragenFuerEntgeltvergleich
@@ -235,7 +236,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
 
         konflikt.ReihungEntgelt.forEach((item, index) => item.rang = index + 1);
         konflikt.markModified('ReihungEntgelt');
-        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
+        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.\n${konflikt.ReihungEntgelt}`);
 
         // Felder für Zuweisung/Ablehnung zurücksetzen, bevor sie neu befüllt werden
         konflikt.zugewieseneAnfragen = [];
@@ -340,6 +341,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
  */
 async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechstpreis = []) {
+    //console.log(listeGeboteHoechstpreis);
     konflikt.ListeGeboteHoechstpreis = listeGeboteHoechstpreis; // Speichere alle eingegangenen Gebote
     konflikt.markModified('ListeGeboteHoechstpreis');
 
@@ -348,7 +350,7 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
 
     // 1. Anfragen identifizieren, die bieten sollten und Gebote validieren
     const anfragenKandidatenFuerHP = konflikt.beteiligteAnfragen.filter(aDoc => {
-        //console.log(aDoc);
+        //console.log(aDoc.ZugewieseneSlots);
         // Gib nur Anfragen zurück, bei denen auf einen Höchstpreis gewartet wird
         for(const slot of aDoc.ZugewieseneSlots){
             //mindestens 1 Slot wartet auf Höchstpreisentscheidung
@@ -357,14 +359,18 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
         return false; // keine der Slots der Anfrage wartet auf Höchtpreisentscheidung
     });
 
+    //console.log(anfragenKandidatenFuerHP);
+
     let valideGebote = [];
     let anfragenOhneValidesGebot = [];
 
     for (const anfrageKandidat of anfragenKandidatenFuerHP) {
         //console.log(anfrageKandidat);
+        //console.log(listeGeboteHoechstpreis);
         const gebotEingang = listeGeboteHoechstpreis.find(
             g => g.anfrage && g.anfrage.toString() === anfrageKandidat._id.toString()
         );
+        //console.log(gebotEingang);
         if (gebotEingang && typeof gebotEingang.gebot === 'number') {
             if (gebotEingang.gebot > (anfrageKandidat.Entgelt || 0)) {
                 valideGebote.push({ anfrage: anfrageKandidat._id, gebot: gebotEingang.gebot });
@@ -978,19 +984,25 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
     // ... (Validierung und Laden der Gruppe wie in verarbeiteGruppenVerzichtVerschub) ...
     if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
     
-    // 1. Lade die Gruppe und alle zugehörigen Daten
-    const gruppe = await KonfliktGruppe.findById(gruppenId)
-        .populate({
-            path: 'beteiligteAnfragen',
-            select: '_id Status Entgelt' // Felder, die wir von den Anfragen brauchen
-        })
-        .populate({
-            path: 'konflikteInGruppe', // Lade die einzelnen Konfliktdokumente
-            populate: {
-                path: 'ausloesenderKapazitaetstopf', // Lade zu jedem Konfliktdokument den Topf
-                select: 'maxKapazitaet TopfID _id'
-            }
-        });
+    // 1. Lade die Gruppe und alle zugehörigen Daten mit korrektem verschachteltem Populate
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'beteiligteAnfragen', // Optional, aber gut für direkten Zugriff auf die gemeinsamen Anfragen
+                select: '_id Status Entgelt AnfrageID_Sprechend EVU'
+            })
+            .populate({
+                path: 'konflikteInGruppe', // Population der Konfliktdokumente in der Gruppe
+                populate: [ // NEU: Array, um mehrere Felder innerhalb der Konfliktdokumente zu populieren
+                    {
+                        path: 'ausloesenderKapazitaetstopf',
+                        select: 'maxKapazitaet TopfID _id'
+                    },
+                    {
+                        path: 'beteiligteAnfragen', // JETZT wird auch dieses Feld in jedem Einzelkonflikt populiert
+                        select: '_id Status Entgelt AnfrageID_Sprechend EVU'
+                    }
+                ]
+            });
         
     if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
 
@@ -1001,6 +1013,7 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
         // Iteriere durch jeden einzelnen Konflikt der Gruppe
         for (const konflikt of gruppe.konflikteInGruppe) {
             // Rufe die zentrale Service-Funktion auf
+            //console.log(konflikt);
             const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt);
 
             // Füge modifizierte Anfragen zur Map hinzu
@@ -1062,23 +1075,30 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
 exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
     const { gruppenId } = req.params;
     const { ListeGeboteHoechstpreis, notizen, notizenUpdateMode } = req.body || {};
+    //console.log(`Initiale Liste der Gebote: ${ListeGeboteHoechstpreis}`);
     
     // ... (Validierung und Laden der Gruppe wie in verarbeiteGruppenVerzichtVerschub) ...
     if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
     
-    // 1. Lade die Gruppe und alle zugehörigen Daten
-    const gruppe = await KonfliktGruppe.findById(gruppenId)
-        .populate({
-            path: 'beteiligteAnfragen',
-            select: '_id Status Entgelt' // Felder, die wir von den Anfragen brauchen
-        })
-        .populate({
-            path: 'konflikteInGruppe', // Lade die einzelnen Konfliktdokumente
-            populate: {
-                path: 'ausloesenderKapazitaetstopf', // Lade zu jedem Konfliktdokument den Topf
-                select: 'maxKapazitaet TopfID _id'
-            }
-        });
+    // 1. Lade die Gruppe und alle zugehörigen Daten mit korrektem verschachteltem Populate
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'beteiligteAnfragen', // Optional, aber gut für direkten Zugriff auf die gemeinsamen Anfragen
+                select: '_id Status Entgelt AnfrageID_Sprechend EVU'
+            })
+            .populate({
+                path: 'konflikteInGruppe', // Population der Konfliktdokumente in der Gruppe
+                populate: [ // NEU: Array, um mehrere Felder innerhalb der Konfliktdokumente zu populieren
+                    {
+                        path: 'ausloesenderKapazitaetstopf',
+                        select: 'maxKapazitaet TopfID _id'
+                    },
+                    {
+                        path: 'beteiligteAnfragen', // JETZT wird auch dieses Feld in jedem Einzelkonflikt populiert
+                        select: '_id Status Entgelt AnfrageID_Sprechend EVU ZugewieseneSlots'
+                    }
+                ]
+            });
 
     if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
     if (gruppe.status !== 'in_bearbeitung_hoechstpreis') {
@@ -1090,22 +1110,19 @@ exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
         let anzahlOffenerKonflikte = 0;
 
         // Iteriere durch jeden einzelnen Konflikt der Gruppe
-        for (const konflikt of gruppe.konflikteInGruppe) {
+        for (const konflikt of gruppe.konflikteInGruppe) {            
+            if (!konflikt) {
+                return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
+            }
             if (konflikt.status !== 'in_bearbeitung_hoechstpreis') continue; // Überspringe ggf. schon gelöste Töpfe in der Gruppe
 
-            // Rufe die zentrale Service-Funktion auf
-            // Übergebe nur die Gebote, die für die Kandidaten dieses Konflikts relevant sind
-            const kandidatenIdsDiesesKonflikts = konflikt.beteiligteAnfragen
-                .filter(a => a.Status === 'wartet_hoechstpreis')
-                .map(a => a._id.toString());
+            if (!konflikt.ausloesenderKapazitaetstopf) {
+                return res.status(500).json({ message: 'Konfliktdokumentation hat keinen verknüpften Kapazitätstopf.' });
+            }
             
-            const relevanteGeboteFuerDiesenKonflikt = (ListeGeboteHoechstpreis || []).filter(g =>
-                kandidatenIdsDiesesKonflikts.includes(g.anfrage.toString())
-            );
-
             const { anfragenToSave } = await resolveHoechstpreisForSingleConflict(
                 konflikt,
-                relevanteGeboteFuerDiesenKonflikt
+                ListeGeboteHoechstpreis
             );
 
             // Füge modifizierte Anfragen zur Map hinzu

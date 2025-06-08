@@ -421,7 +421,7 @@ exports.updateAnfrage = async (req, res) => {
         // Definiere, welche Felder aktualisiert werden dürfen (Korrektur durch Nutzer)
         const allowedUpdates = [
             'ListeGewuenschterSlotAbschnitte', 'Verkehrsart', 'Verkehrstag',
-            'Zeitraum', 'Email'
+            'Zeitraum', 'Email', 'Entgelt'
         ];
         const updates = req.body;
         let anfrageWurdeGeaendert = false;

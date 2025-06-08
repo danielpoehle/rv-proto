@@ -14,7 +14,8 @@ const GLOBAL_KW1_START_DATE_ISO = "2024-12-30T00:00:00.000Z";
 
 
 describe('Gruppierte Konfliktlösung', () => {
-    let anfrage_A, anfrage_B;
+    jest.setTimeout(20000);
+    let anfrage_A, anfrage_B, anfrage_C, anfrage_D;
     let erstellteSlots = [];
     let erstellteKonfliktDokus = [];
     const grundentgelt = 100;
@@ -50,45 +51,67 @@ describe('Gruppierte Konfliktlösung', () => {
         // Wir erstellen für 3 Wochen (KW 1, 2, 3) jeweils einen Mo-Fr und einen Sa+So Slot
         // für denselben Abschnitt. Das sind 6 Slot-Muster, die 6 Töpfe erzeugen.
         // Jeder Topf hat eine maxKapazitaet von 1 (erstellt durch 2 Slots pro Topf-Definition).
-        const commonSlotParams = {
-            von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke",
+        const commonSlotParams1 = {
+            von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke1",
             Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
+            Grundentgelt: grundentgelt
+        };
+
+        const commonSlotParams2 = {
+            von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abschnitt: "Gruppen-Strecke2",
+            Verkehrsart: "SPFV", Abfahrt: { stunde: 10, minute: 0 }, Ankunft: { stunde: 11, minute: 0 },
             Grundentgelt: grundentgelt
         };
 
         for (let kw = 1; kw <= anzahlWochen; kw++) {
             for (const vt of ["Mo-Fr", "Sa+So"]) {
-                // Erstelle 2 Slots pro Topf-Definition, um maxKap=1 zu erhalten
-                await request(app).post('/api/slots').send({ ...commonSlotParams, Kalenderwoche: kw, Verkehrstag: vt });
-                const resp = await request(app).post('/api/slots').send({ ...commonSlotParams, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });
-                erstellteSlots = await Slot.find({});
+                // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
+                await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Verkehrstag: vt });
+                await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Verkehrstag: vt });
+                await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });
+                await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 10, minute: 10 }, Ankunft: { stunde: 11, minute: 10 } });
+                await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 9, minute: 20 }, Ankunft: { stunde: 10, minute: 20 } });
+                await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 10, minute: 20 }, Ankunft: { stunde: 11, minute: 20 } });                
             }
         }
-        expect(erstellteSlots.length).toBe(12); //2 Slots in 3 Wochen in den 2 Töpfen Mo-Fr und Sa+So sind 12 Slots insgesamt
-        const topfCheck = await Kapazitaetstopf.findOne({ Abschnitt: "Gruppen-Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr" });
-        expect(topfCheck.maxKapazitaet).toBe(1); // floor(0.7*2) = 1
+        erstellteSlots = await Slot.find({});
+        expect(erstellteSlots.length).toBe(36); //3 Slots in 3 Wochen auf 2 Abschitten in den 2 Töpfen Mo-Fr und Sa+So sind 36 Slots insgesamt
+        const topfCheck = await Kapazitaetstopf.findOne({ Abschnitt: "Gruppen-Strecke1", Kalenderwoche: 1, Verkehrstag: "Mo-Fr" });
+        expect(topfCheck.maxKapazitaet).toBe(2); // floor(0.7*3) = 2
 
-        // 2. Zwei Anfragen erstellen, die beide "täglich" über 3 Wochen verkehren
+        // 2. Vier Anfragen erstellen, die alle "täglich" über 3 Wochen verkehren
         const anfrageZeitraum = {
             start: GLOBAL_KW1_START_DATE_ISO, // Start KW 1
             ende: addDays(parseISO(GLOBAL_KW1_START_DATE_ISO), (anzahlWochen * 7) - 1) // Ende KW 3
         };
         const anfrageBasis = {
             EVU: "GruppenEVU", Email: "gruppe@evu.com", Verkehrsart: "SPFV", Verkehrstag: "täglich",
-            ListeGewuenschterSlotAbschnitte: [{ von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abfahrtszeit: { stunde: 9, minute: 0 }, Ankunftszeit: { stunde: 10, minute: 0 } }],
+            ListeGewuenschterSlotAbschnitte: [{ von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abfahrtszeit: { stunde: 9, minute: 0 }, Ankunftszeit: { stunde: 10, minute: 0 } },
+                                              { von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abfahrtszeit: { stunde: 10, minute: 0 }, Ankunftszeit: { stunde: 11, minute: 0 } }
+            ],
             Zeitraum: anfrageZeitraum, Status: "validiert"
         };
 
-        anfrage_A = await new Anfrage({ ...anfrageBasis, Zugnummer: "GA" }).save();
-        anfrage_B = await new Anfrage({ ...anfrageBasis, Zugnummer: "GB" }).save();        
+        anfrage_A = await new Anfrage({ ...anfrageBasis, Zugnummer: "GA"}).save();
+        anfrage_B = await new Anfrage({ ...anfrageBasis, Zugnummer: "GB"}).save();        
+        anfrage_C = await new Anfrage({ ...anfrageBasis, Zugnummer: "GC"}).save();        
+        anfrage_D = await new Anfrage({ ...anfrageBasis, Zugnummer: "GD"}).save();        
 
-        // 3. Zuordnungsprozess für beide Anfragen anstoßen -> Erzeugt die Konfliktsituation
+        // 3. Zuordnungsprozess für die Anfragen anstoßen -> Erzeugt die Konfliktsituation
         await request(app).post(`/api/anfragen/${anfrage_A._id}/zuordnen`).send();
         await request(app).post(`/api/anfragen/${anfrage_B._id}/zuordnen`).send();
+        await request(app).post(`/api/anfragen/${anfrage_C._id}/zuordnen`).send();
+        await request(app).post(`/api/anfragen/${anfrage_D._id}/zuordnen`).send();
+
+        // Entgelt der Anfragen anpassen        
+        await request(app).put(`/api/anfragen/${anfrage_A._id}`).send({Entgelt: 1000, Status: 'validiert'}); 
+        await request(app).put(`/api/anfragen/${anfrage_B._id}`).send({Entgelt:  900, Status: 'validiert'}); 
+        await request(app).put(`/api/anfragen/${anfrage_C._id}`).send({Entgelt:  800, Status: 'validiert'}); 
+        await request(app).put(`/api/anfragen/${anfrage_D._id}`).send({Entgelt:  700, Status: 'validiert'});         
 
         // 4. Konflikterkennung anstoßen -> Erzeugt die KonfliktDokumentationen und die KonfliktGruppe
         const identResp = await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
-        expect(identResp.body.neuErstellteKonflikte).toHaveLength(6);
+        expect(identResp.body.neuErstellteKonflikte).toHaveLength(12); //2 Abschnitte, 3 Wochen, Mo-Fr und Sa+So
         erstellteKonfliktDokus = await KonfliktDokumentation.find({});
         //console.log(erstellteKonfliktDokus);
         //let gruppen = await KonfliktGruppe.find({});
@@ -96,7 +119,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 
     // ----- TEST 1: GRUPPEN-IDENTIFIZIERUNG -----
-    it('sollte korrekt eine Konfliktgruppe mit 6 Konflikten und 2 beteiligten Anfragen identifizieren', async () => {
+    it('sollte korrekt eine Konfliktgruppe mit 12 Konflikten und 4 beteiligten Anfragen identifizieren', async () => {
         // Aktion
         const response = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(response.body);
@@ -106,32 +129,32 @@ describe('Gruppierte Konfliktlösung', () => {
         expect(response.body.data).toHaveLength(1); // Es sollte genau eine Gruppe geben
 
         const gruppe = response.body.data[0];
-        expect(gruppe.konflikteInGruppe).toHaveLength(6);
-        expect(gruppe.beteiligteAnfragen).toHaveLength(2);
+        expect(gruppe.konflikteInGruppe).toHaveLength(12);
+        expect(gruppe.beteiligteAnfragen).toHaveLength(4);
 
         const beteiligteIds = gruppe.beteiligteAnfragen.map(a => a._id.toString());
         expect(beteiligteIds).toContain(anfrage_A._id.toString());
         expect(beteiligteIds).toContain(anfrage_B._id.toString());
+        expect(beteiligteIds).toContain(anfrage_C._id.toString());
+        expect(beteiligteIds).toContain(anfrage_D._id.toString());
     });
 
     // ----- TEST 2: GRUPPEN-KONFLIKTLÖSUNG (PHASE 1) -----
-    it('sollte eine Gruppenentscheidung (Verzicht) korrekt auf alle 6 Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung (Verzicht) korrekt auf alle 12 Konflikte anwenden und diese lösen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
-        //console.log(gruppenResp.body);
-        const gruppe = gruppenResp.body.data[0];
-        const gruppenId = gruppe.konflikteInGruppe[0]; // Falsch: gruppenId ist die _id der Gruppe
-        const konfliktGruppe = await KonfliktGruppe.findOne({ gruppenSchluessel: gruppe.gruppenSchluessel });
-        const gruppenId_korrekt = konfliktGruppe._id;
+        //console.log(gruppenResp.body);        
+        const konfliktGruppe = await KonfliktGruppe.findOne({ }); // es ist nur 1 Gruppe in der Datenbank
+        const gruppenId = konfliktGruppe._id;
 
-        // Aktion: Anfrage B verzichtet für die gesamte Gruppe
+        // Aktion: Anfrage B und D verzichten für die gesamte Gruppe
         const updatePayload = {
-            konfliktDokumentIds: gruppe.konflikteInGruppe.map(k => k._id), // Identifiziert die Gruppe
-            ListeAnfragenMitVerzicht: [anfrage_B._id.toString()]
+            konfliktDokumentIds: konfliktGruppe.konflikteInGruppe.map(k => k._id), // Identifiziert die Gruppe
+            ListeAnfragenMitVerzicht: [anfrage_B._id.toString(), anfrage_D._id.toString()]
         };
 
         const loesenResponse = await request(app)
-            .put(`/api/konflikte/gruppen/${gruppenId_korrekt}/verzicht-verschub`) // Neuer Endpunkt mit :gruppenId
+            .put(`/api/konflikte/gruppen/${gruppenId}/verzicht-verschub`)
             .send(updatePayload);
 
         //console.log(loesenResponse.body);
@@ -139,25 +162,315 @@ describe('Gruppierte Konfliktlösung', () => {
         // Überprüfung
         expect(loesenResponse.status).toBe(200);
         expect(loesenResponse.body.data.gruppe.status).toBe('vollstaendig_geloest');
-        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(6);
-        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(6);
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(12);
         expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(0);
         
-        const gruppe_final = await KonfliktGruppe.findById(gruppenId_korrekt);
+        const gruppe_final = await KonfliktGruppe.findById(gruppenId);
         expect(gruppe_final.status).toBe('vollstaendig_geloest');
 
         // Stichprobenartige Prüfung eines der 6 Konfliktdokumente
-        const einKonflikt_final = await KonfliktDokumentation.findById(erstellteKonfliktDokus[0]._id);
+        const einKonflikt_final = await KonfliktDokumentation.findById(erstellteKonfliktDokus[2]._id);
         expect(einKonflikt_final.status).toBe('geloest');
-        expect(einKonflikt_final.zugewieseneAnfragen).toHaveLength(1);
-        expect(einKonflikt_final.zugewieseneAnfragen[0].toString()).toBe(anfrage_A._id.toString());
-        expect(einKonflikt_final.ListeAnfragenMitVerzicht).toHaveLength(1);
-        expect(einKonflikt_final.ListeAnfragenMitVerzicht[0].toString()).toBe(anfrage_B._id.toString());
+        expect(einKonflikt_final.zugewieseneAnfragen).toHaveLength(2);
+        const zuewieseneIds = einKonflikt_final.zugewieseneAnfragen.map(a => a._id.toString());
+        expect(zuewieseneIds).toContain(anfrage_A._id.toString());
+        expect(zuewieseneIds).toContain(anfrage_C._id.toString());        
+        expect(einKonflikt_final.ListeAnfragenMitVerzicht).toHaveLength(2);
+        const verzichteteIds = einKonflikt_final.ListeAnfragenMitVerzicht.map(a => a._id.toString());
+        expect(verzichteteIds).toContain(anfrage_B._id.toString());
+        expect(verzichteteIds).toContain(anfrage_D._id.toString()); 
 
         // Überprüfung des Status von Anfrage B
         const anfrage_B_final = await Anfrage.findById(anfrage_B._id);
         // Da A_B für ALLE ihre 6 Topf-Konflikte einen Verzicht eingetragen hat,
         // sollte ihr Gesamtstatus jetzt "final_abgelehnt" sein.
         expect(anfrage_B_final.Status).toBe('final_abgelehnt'); 
+    });
+
+    // ----- TEST 3: GRUPPEN-KONFLIKTLÖSUNG (PHASE 2 Entgeltvergleich mit eindeutigem Ergebnis) -----
+    it('sollte eine Gruppenentscheidung (Entgeltvergleich eindeutig) korrekt auf alle 12 Konflikte anwenden und diese lösen', async () => {
+        // Setup: Holen der gruppenId
+        const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
+        //console.log(gruppenResp.body);        
+        const konfliktGruppe = await KonfliktGruppe.findOne({ }); // es ist nur 1 Gruppe in der Datenbank
+        const gruppenId = konfliktGruppe._id;
+
+        // Aktion: keine Anfrage verzichtet für die gesamte Gruppe        
+
+        let loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/verzicht-verschub`)
+            .send({});
+
+        //console.log(loesenResponse.body);
+
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('in_bearbeitung_entgelt');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(0);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(12);
+        let einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
+        expect(einKonflikt_zwischen.status).toBe('in_bearbeitung_entgelt');
+        expect(einKonflikt_zwischen.beteiligteAnfragen).toHaveLength(4);
+        const beteiligteIDs = einKonflikt_zwischen.beteiligteAnfragen.map(a => a._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_A._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_B._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_C._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_D._id.toString());
+
+        
+        const gruppe_entgelt = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_entgelt.status).toBe('in_bearbeitung_entgelt');        
+
+        // Aktion: Entgeltvergleich anstoßen        
+        loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/entgeltvergleich`)
+            .send({});
+        
+        einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
+        //console.log(einKonflikt_zwischen);
+        let anfrage_B_zwischen = await Anfrage.findById(anfrage_B._id);
+        //console.log(anfrage_B_zwischen);
+
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('vollstaendig_geloest');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(0);
+
+        const gruppe_final = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_final.status).toBe('vollstaendig_geloest');
+
+        // Stichprobenartige Prüfung eines der 6 Konfliktdokumente
+        const einKonflikt_final = await KonfliktDokumentation.findById(erstellteKonfliktDokus[3]._id);
+        expect(einKonflikt_final.status).toBe('geloest');
+        expect(einKonflikt_final.zugewieseneAnfragen).toHaveLength(2);
+        const zuewieseneIds = einKonflikt_final.zugewieseneAnfragen.map(a => a._id.toString());
+        expect(zuewieseneIds).toContain(anfrage_A._id.toString());
+        expect(zuewieseneIds).toContain(anfrage_B._id.toString());        
+        expect(einKonflikt_final.abgelehnteAnfragenEntgeltvergleich).toHaveLength(2);
+        const verzichteteIds = einKonflikt_final.abgelehnteAnfragenEntgeltvergleich.map(a => a._id.toString());
+        expect(verzichteteIds).toContain(anfrage_C._id.toString());
+        expect(verzichteteIds).toContain(anfrage_D._id.toString());
+        expect(einKonflikt_final.abgelehnteAnfragenHoechstpreis).toHaveLength(0); 
+
+        // Überprüfung des Status von Anfrage B
+        const anfrage_B_final = await Anfrage.findById(anfrage_B._id);
+        // Da B für ALLE ihre 6 Topf-Konflikte gewonnen hat,
+        // sollte ihr Gesamtstatus jetzt "vollstaendig_bestaetigt_topf" sein.
+        expect(anfrage_B_final.Status).toBe('vollstaendig_bestaetigt_topf'); 
+        // Überprüfung des Status von Anfrage C
+        const anfrage_C_final = await Anfrage.findById(anfrage_C._id);
+        // Da C für ALLE ihre 6 Topf-Konflikte verloren hat,
+        // sollte ihr Gesamtstatus jetzt "final_abgelehnt" sein.
+        expect(anfrage_C_final.Status).toBe('final_abgelehnt'); 
+    });
+
+    // ----- TEST 4: GRUPPEN-KONFLIKTLÖSUNG (PHASE 2 Entgeltvergleich führt zu Höchstpreisverfahren) -----
+    it('sollte eine Gruppenentscheidung (Entgeltvergleich Gleichstand) korrekt auf alle 12 Konflikte anwenden und diese als ungelöst markieren', async () => {
+        // Setup: Holen der gruppenId
+        const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
+        //console.log(gruppenResp.body);        
+        const konfliktGruppe = await KonfliktGruppe.findOne({ }); // es ist nur 1 Gruppe in der Datenbank
+        const gruppenId = konfliktGruppe._id;
+
+        //Anfrage B und C haben das gleiche Entgelt von 900
+        await request(app).put(`/api/anfragen/${anfrage_C._id}`).send({Entgelt:  900, Status: 'validiert'}); 
+
+        // Aktion: keine Anfrage verzichtet für die gesamte Gruppe  
+        let loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/verzicht-verschub`)
+            .send({});
+
+        //console.log(loesenResponse.body);
+
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('in_bearbeitung_entgelt');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(0);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(12);
+        let einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
+        expect(einKonflikt_zwischen.status).toBe('in_bearbeitung_entgelt');
+        expect(einKonflikt_zwischen.beteiligteAnfragen).toHaveLength(4);
+        const beteiligteIDs = einKonflikt_zwischen.beteiligteAnfragen.map(a => a._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_A._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_B._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_C._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_D._id.toString());
+
+        
+        const gruppe_entgelt = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_entgelt.status).toBe('in_bearbeitung_entgelt');        
+
+        // Aktion: Entgeltvergleich anstoßen        
+        loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/entgeltvergleich`)
+            .send({});
+        
+        einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
+        console.log(einKonflikt_zwischen);
+        let anfrage_B_zwischen = await Anfrage.findById(anfrage_B._id);
+        //console.log(anfrage_B_zwischen);
+
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('in_bearbeitung_hoechstpreis');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(0);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(12);
+
+        const gruppe_final = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_final.status).toBe('in_bearbeitung_hoechstpreis');
+
+        // Stichprobenartige Prüfung eines der 6 Konfliktdokumente
+        const einKonflikt_final = await KonfliktDokumentation.findById(erstellteKonfliktDokus[3]._id);
+        expect(einKonflikt_final.status).toBe('in_bearbeitung_hoechstpreis');
+        expect(einKonflikt_final.zugewieseneAnfragen).toHaveLength(1);
+        const zuewieseneIds = einKonflikt_final.zugewieseneAnfragen.map(a => a._id.toString());
+        expect(zuewieseneIds).toContain(anfrage_A._id.toString());      
+        expect(einKonflikt_final.abgelehnteAnfragenEntgeltvergleich).toHaveLength(1);
+        const verzichteteIds = einKonflikt_final.abgelehnteAnfragenEntgeltvergleich.map(a => a._id.toString());
+        expect(verzichteteIds).toContain(anfrage_D._id.toString());
+        expect(einKonflikt_final.abgelehnteAnfragenHoechstpreis).toHaveLength(0);         
+
+        // Überprüfung des Status von Anfrage A
+        const anfrage_A_final = await Anfrage.findById(anfrage_A._id);
+        // Da B für ALLE ihre 6 Topf-Konflikte gewonnen hat,
+        // sollte ihr Gesamtstatus jetzt "vollstaendig_bestaetigt_topf" sein.
+        expect(anfrage_A_final.Status).toBe('vollstaendig_bestaetigt_topf');
+        // Überprüfung des Status von Anfrage B
+        const anfrage_B_final = await Anfrage.findById(anfrage_B._id);
+        // Da B für ALLE ihre 6 Topf-Konflikte im Höchstpreisverfahren ist,
+        // sollte ihr Gesamtstatus jetzt "in_konfliktloesung_topf" sein.
+        expect(anfrage_B_final.Status).toBe('in_konfliktloesung_topf'); 
+        // Überprüfung des Status von Anfrage C
+        const anfrage_C_final = await Anfrage.findById(anfrage_C._id);
+        // Da C für ALLE ihre 6 Topf-Konflikte im Höchstpreisverfahren ist,
+        // sollte ihr Gesamtstatus jetzt "in_konfliktloesung_topf" sein.
+        expect(anfrage_C_final.Status).toBe('in_konfliktloesung_topf'); 
+        // Überprüfung des Status von Anfrage D
+        const anfrage_D_final = await Anfrage.findById(anfrage_D._id);
+        // Da D für ALLE ihre 6 Topf-Konflikte verloren hat,
+        // sollte ihr Gesamtstatus jetzt "final_abgelehnt" sein.
+        expect(anfrage_D_final.Status).toBe('final_abgelehnt'); 
+    });
+
+    // ----- TEST 5: GRUPPEN-KONFLIKTLÖSUNG (PHASE 3 Durchführung Höchstpreisverfahren) -----
+    it('sollte eine Gruppenentscheidung (Höchstpreisverfahren) korrekt auf alle 12 Konflikte anwenden und diese lösen', async () => {
+        // Setup: Holen der gruppenId
+        const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
+        //console.log(gruppenResp.body);        
+        const konfliktGruppe = await KonfliktGruppe.findOne({ }); // es ist nur 1 Gruppe in der Datenbank
+        const gruppenId = konfliktGruppe._id;
+
+        //Anfrage B und C haben das gleiche Entgelt von 900
+        await request(app).put(`/api/anfragen/${anfrage_C._id}`).send({Entgelt:  900, Status: 'validiert'}); 
+
+        // Aktion: keine Anfrage verzichtet für die gesamte Gruppe  
+        let loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/verzicht-verschub`)
+            .send({});
+
+        //console.log(loesenResponse.body);
+
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('in_bearbeitung_entgelt');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(0);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(12);
+        let einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
+        expect(einKonflikt_zwischen.status).toBe('in_bearbeitung_entgelt');
+        expect(einKonflikt_zwischen.beteiligteAnfragen).toHaveLength(4);
+        const beteiligteIDs = einKonflikt_zwischen.beteiligteAnfragen.map(a => a._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_A._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_B._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_C._id.toString());
+        expect(beteiligteIDs).toContain(anfrage_D._id.toString());
+
+        
+        const gruppe_entgelt = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_entgelt.status).toBe('in_bearbeitung_entgelt');        
+
+        // Aktion: Entgeltvergleich anstoßen        
+        loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/entgeltvergleich`)
+            .send({});        
+        
+
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('in_bearbeitung_hoechstpreis');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(0);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(12);
+
+        const gruppe_zwischen = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_zwischen.status).toBe('in_bearbeitung_hoechstpreis');
+
+        // ---- AKTION: Ergebnisse des Höchstpreisverfahrens senden ----
+        const hoechstpreisPayload = {
+            ListeGeboteHoechstpreis: [
+                { anfrage: anfrage_B._id.toString(), gebot: 920 }, // B bietet 920
+                { anfrage: anfrage_C._id.toString(), gebot: 950 }  // C bietet 950
+            ]
+        };
+
+        loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppenId}/hoechstpreis-ergebnis`)
+            .send(hoechstpreisPayload);
+
+        einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
+        console.log(einKonflikt_zwischen);
+        let anfrage_B_zwischen = await Anfrage.findById(anfrage_B._id);
+        console.log(anfrage_B_zwischen);
+
+        const gruppe_final = await KonfliktGruppe.findById(gruppenId);
+        expect(gruppe_final.status).toBe('vollstaendig_geloest');
+        
+        // Überprüfung
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('vollstaendig_geloest');
+        expect(loesenResponse.body.data.zusammenfassung.anzahlKonflikteInGruppe).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonGeloest).toBe(12);
+        expect(loesenResponse.body.data.zusammenfassung.davonOffen).toBe(0);
+
+        // Stichprobenartige Prüfung eines der 6 Konfliktdokumente
+        const einKonflikt_final = await KonfliktDokumentation.findById(erstellteKonfliktDokus[4]._id);
+        expect(einKonflikt_final.status).toBe('geloest');
+        expect(einKonflikt_final.zugewieseneAnfragen).toHaveLength(2);
+        const zuewieseneIds = einKonflikt_final.zugewieseneAnfragen.map(a => a._id.toString());
+        expect(zuewieseneIds).toContain(anfrage_A._id.toString());      
+        expect(zuewieseneIds).toContain(anfrage_C._id.toString());      
+        expect(einKonflikt_final.abgelehnteAnfragenEntgeltvergleich).toHaveLength(1);
+        const verzichteteIds = einKonflikt_final.abgelehnteAnfragenEntgeltvergleich.map(a => a._id.toString());
+        expect(verzichteteIds).toContain(anfrage_D._id.toString());
+        expect(einKonflikt_final.abgelehnteAnfragenHoechstpreis).toHaveLength(1); 
+        const hoechtpreisIds = einKonflikt_final.abgelehnteAnfragenHoechstpreis.map(a => a._id.toString());
+        expect(hoechtpreisIds).toContain(anfrage_B._id.toString());        
+
+        // Überprüfung des Status von Anfrage A
+        const anfrage_A_final = await Anfrage.findById(anfrage_A._id);
+        // Da B für ALLE ihre 6 Topf-Konflikte gewonnen hat,
+        // sollte ihr Gesamtstatus jetzt "vollstaendig_bestaetigt_topf" sein.
+        expect(anfrage_A_final.Status).toBe('vollstaendig_bestaetigt_topf');
+        // Überprüfung des Status von Anfrage B
+        const anfrage_B_final = await Anfrage.findById(anfrage_B._id);
+        // Da B für ALLE ihre 6 Topf-Konflikte im Höchstpreisverfahren ist,
+        // sollte ihr Gesamtstatus jetzt "in_konfliktloesung_topf" sein.
+        expect(anfrage_B_final.Status).toBe('final_abgelehnt'); 
+        // Überprüfung des Status von Anfrage C
+        const anfrage_C_final = await Anfrage.findById(anfrage_C._id);
+        // Da C für ALLE ihre 6 Topf-Konflikte im Höchstpreisverfahren ist,
+        // sollte ihr Gesamtstatus jetzt "in_konfliktloesung_topf" sein.
+        expect(anfrage_C_final.Status).toBe('vollstaendig_bestaetigt_topf'); 
+        // Überprüfung des Status von Anfrage D
+        const anfrage_D_final = await Anfrage.findById(anfrage_D._id);
+        // Da D für ALLE ihre 6 Topf-Konflikte verloren hat,
+        // sollte ihr Gesamtstatus jetzt "final_abgelehnt" sein.
+        expect(anfrage_D_final.Status).toBe('final_abgelehnt'); 
     });
 });
