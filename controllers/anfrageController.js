@@ -499,15 +499,16 @@ exports.zuordneSlotsZuAnfrage = async (req, res) => {
         const relevanteGlobalRelativeKWs = []; // Array für Nummern der KWs
         const startRelKW = getGlobalRelativeKW(anfrageStartDatum);
         const endRelKW = getGlobalRelativeKW(anfrageEndDatum);
+        //console.log(`Relative Wochen von ${startRelKW} bis ${endRelKW}`);
 
         if (startRelKW === null || endRelKW === null || startRelKW > endRelKW) {
-            // ... (Fehlerbehandlung für ungültigen Zeitraum wie zuvor) ...
+            return res.status(400).json({ message: `Anfrage hat ungültigen Zeitraum von KW ${startRelKW} bis ${endRelKW}.` });
         }
         for (let kw = startRelKW; kw <= endRelKW; kw++) {
             relevanteGlobalRelativeKWs.push(kw);
         }
         if (relevanteGlobalRelativeKWs.length === 0 && ListeGewuenschterSlotAbschnitte.length > 0) {
-            // ... (Fehlerbehandlung für keine relevanten KWs wie zuvor) ...
+            return res.status(400).json({ message: `Anfrage hat keinen passenden Zeitraum von KW ${startRelKW} bis ${endRelKW} aber gewünschte Abschnitte ${ListeGewuenschterSlotAbschnitte}.` });
         }
 
         let zuzuweisendeSlotIdsSet = new Set(); // Sammelt String-IDs zur Vermeidung von Duplikaten
@@ -523,6 +524,7 @@ exports.zuordneSlotsZuAnfrage = async (req, res) => {
                     zielSlotVerkehrstageFuerSlotSuche = [anfrageVerkehrstagGruppe];
                 }
                 for (const slotVerkehrstag of zielSlotVerkehrstageFuerSlotSuche) {
+                    //console.log(`${gewuenschterAbschnitt}, ${anfrageVerkehrsart}, KW ${globRelKW}, VT ${slotVerkehrstag}`);
                     const matchingSlots = await Slot.find({
                         von: gewuenschterAbschnitt.von,
                         bis: gewuenschterAbschnitt.bis,

@@ -847,7 +847,7 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
 // @desc    Ruft alle persistierten Konfliktgruppen ab
 // @route   GET /api/konflikte/gruppen
 exports.identifiziereKonfliktGruppen = async (req, res) => {
-    try {
+    try {        
         // Filtere optional nach Status der Gruppe, z.B. alle, die nicht gelöst sind
         const filter = { status: { $ne: 'vollstaendig_geloest' } };
 

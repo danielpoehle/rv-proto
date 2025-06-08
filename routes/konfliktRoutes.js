@@ -8,6 +8,12 @@ const konfliktController = require('../controllers/konfliktController');
 // @access  Admin/System (angenommen)
 router.post('/identifiziere-topf-konflikte', konfliktController.identifiziereTopfKonflikte);
 
+// ROUTE zum Abruf aller Gruppen von Konflikten
+// @route   GET /api/konflikte/gruppen
+// @desc    Ruft alle Gruppen von Konflikten mit identischen beteiligten Anfragen ab
+// @access  Admin/System
+router.get('/gruppen', konfliktController.identifiziereKonfliktGruppen);
+
 // @route   GET /api/konflikte
 // @desc    Ruft alle Konfliktdokumentationen ab (optional filterbar)
 // @access  Admin/System (angenommen)
@@ -31,12 +37,6 @@ router.put('/:konfliktId/entgeltvergleich', konfliktController.fuehreEntgeltverg
 // @desc    Führt das Höchstpreisverfahren für einen EINZELNEN Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/hoechstpreis-ergebnis
 router.put('/:konfliktId/hoechstpreis-ergebnis', konfliktController.verarbeiteHoechstpreisErgebnis);
-
-// ROUTE zum Abruf aller Gruppen von Konflikten
-// @route   GET /api/konflikte/gruppen
-// @desc    Ruft alle Gruppen von Konflikten mit identischen beteiligten Anfragen ab
-// @access  Admin/System
-router.get('/gruppen', konfliktController.identifiziereKonfliktGruppen);
 
 // ROUTEN für die phasenweise GRUPPEN-Konfliktlösung
 // Phase 1: Verzicht und Verschub für eine Gruppe
