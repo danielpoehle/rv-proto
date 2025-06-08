@@ -2,44 +2,19 @@
 const mongoose = require('mongoose');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf'); // Das aktualisierte Modell
 const Slot = require('../models/Slot'); // Benötigt für die Prüfung von Referenzen
+const kapazitaetstopfService = require('../utils/kapazitaetstopf.service'); // <-- NEUER Import
 
 // @desc    Erstellt einen neuen Kapazitätstopf
 // @route   POST /api/kapazitaetstoepfe
 exports.createKapazitaetstopf = async (req, res) => {
     try {
-        const {
-            // TopfID wird generiert
-            Abschnitt,
-            Verkehrsart,
-            // maxKapazitaet wird nicht mehr direkt gesetzt, default ist 0
-            Zeitfenster,
-            // ZeitfensterStartStunde wird durch Hook generiert
-            Kalenderwoche,
-            Verkehrstag,
-            // ListeDerSlots wird initial leer sein
-            TopfIDVorgänger,
-            TopfIDNachfolger
-        } = req.body;
-
-        const neuerTopf = new Kapazitaetstopf({
-            Abschnitt,
-            Verkehrsart,
-            Zeitfenster,
-            Kalenderwoche,
-            Verkehrstag,
-            // ListeDerSlots wird standardmäßig leer sein ([])
-            // maxKapazitaet wird standardmäßig 0 sein
-            TopfIDVorgänger: TopfIDVorgänger || null,
-            TopfIDNachfolger: TopfIDNachfolger || null
-        });
-
-        await neuerTopf.save(); // Hooks für TopfID und ZeitfensterStartStunde laufen
+        const neuerTopf = await kapazitaetstopfService.createAndLinkKapazitaetstopf(req.body);
 
         res.status(201).json({
-            message: 'Kapazitätstopf erfolgreich erstellt (initial ohne Slots und maxKapazitaet=0).',
+            message: 'Kapazitätstopf erfolgreich erstellt und mit Nachbarn verknüpft (falls vorhanden).',
             data: neuerTopf
         });
-
+         
     } catch (error) {
         // ... (Fehlerbehandlung bleibt wie zuvor) ...
         console.error('Fehler beim Erstellen des Kapazitätstopfes:', error);
@@ -141,6 +116,89 @@ exports.getKapazitaetstopfById = async (req, res) => {
     }
 };
 
+// @desc    Aktualisiert einen Kapazitätstopf
+// @route   PUT /api/kapazitaetstoepfe/:topfIdOderMongoId
+exports.updateKapazitaetstopf = async (req, res) => {
+    try {
+        const idParam = req.params.topfIdOderMongoId;
+        const updates = req.body || {};
+
+        let topf = await Kapazitaetstopf.findOne({ 
+            $or: [{ _id: mongoose.Types.ObjectId.isValid(idParam) ? idParam : null }, { TopfID: idParam }]
+        });
+
+        if (!topf) {
+            return res.status(404).json({ message: 'Kapazitätstopf nicht gefunden.' });
+        }
+
+        // Alte Nachbarn und Eigenschaften für die Verknüpfung merken
+        const alterVorgängerId = topf.TopfIDVorgänger;
+        const alterNachfolgerId = topf.TopfIDNachfolger;
+        const alteLinkEigenschaften = {
+            Abschnitt: topf.Abschnitt, Kalenderwoche: topf.Kalenderwoche, Verkehrstag: topf.Verkehrstag,
+            Verkehrsart: topf.Verkehrsart, Zeitfenster: topf.Zeitfenster
+        };
+
+        // Update durchführen
+        const allowedUpdates = [ 'Abschnitt', 'Verkehrsart', 'Zeitfenster', 'Kalenderwoche', 'Verkehrstag' /* weitere Metadaten */ ];
+        let linkEigenschaftenGeaendert = false;
+        for (const key in updates) {
+            if (allowedUpdates.includes(key)) {
+                if(JSON.stringify(topf[key]) !== JSON.stringify(updates[key])) { // Prüfe ob es eine echte Änderung ist
+                    topf[key] = updates[key];
+                    if(['Abschnitt', 'Kalenderwoche', 'Verkehrstag', 'Verkehrsart', 'Zeitfenster'].includes(key)) {
+                        linkEigenschaftenGeaendert = true;
+                    }
+                }
+            }
+        }
+        
+        // Wenn keine relevanten Änderungen, nur speichern und antworten
+        if (!linkEigenschaftenGeaendert) {
+            const aktualisierterTopf = await topf.save();
+            return res.status(200).json({ message: 'Kapazitätstopf aktualisiert (keine Änderung an Nachbar-Verknüpfungen).', data: aktualisierterTopf });
+        }
+
+        // -- Wenn sich Link-Eigenschaften geändert haben --
+        
+        // 1. Topf von alten Nachbarn trennen (falls vorhanden)
+        if (alterVorgängerId) {
+            await Kapazitaetstopf.updateOne({ _id: alterVorgängerId }, { $set: { TopfIDNachfolger: null } });
+            console.log(`Alte Verknüpfung zu Vorgänger ${alterVorgängerId} getrennt.`);
+        }
+        if (alterNachfolgerId) {
+            await Kapazitaetstopf.updateOne({ _id: alterNachfolgerId }, { $set: { TopfIDVorgänger: null } });
+            console.log(`Alte Verknüpfung zu Nachfolger ${alterNachfolgerId} getrennt.`);
+        }
+        
+        // Verweise im aktuellen Topf vor dem Speichern zurücksetzen
+        topf.TopfIDVorgänger = null;
+        topf.TopfIDNachfolger = null;
+
+        // Speichere den Topf mit seinen neuen Eigenschaften
+        await topf.save();       
+
+        // ----- Finde und verknüpfe Vorgänger und Nachfolger -----
+        const finalerTopf = await kapazitaetstopfService.findAndLinkLogic(topf);
+
+        res.status(200).json({
+            message: 'Kapazitätstopf erfolgreich aktualisiert und neu mit Nachbarn verknüpft.',
+            data: finalerTopf
+        });
+    } catch (error) {
+        // ... (Fehlerbehandlung bleibt wie zuvor) ...
+        console.error('Fehler beim Update des Kapazitätstopfes:', error);
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(val => val.message);
+            return res.status(400).json({ message: 'Validierungsfehler.', errors: messages });
+        }
+        if (error.code === 11000 && error.keyPattern && error.keyPattern.TopfID) {
+             return res.status(409).json({ message: `Ein Kapazitätstopf mit den generierenden Eigenschaften (Abschnitt, KW, Verkehrsart, Verkehrstag) existiert bereits und würde dieselbe TopfID erzeugen.`});
+        }
+        res.status(500).json({ message: 'Serverfehler beim Erstellen des Kapazitätstopfes.' });
+    }
+};
+
 
 // @desc    Löscht einen Kapazitätstopf
 // @route   DELETE /api/kapazitaetstoepfe/:topfIdOderMongoId
@@ -173,6 +231,16 @@ exports.deleteKapazitaetstopf = async (req, res) => {
             return res.status(409).json({
                 message: `Kapazitätstopf kann nicht gelöscht werden, da er noch von mindestens einem Slot (z.B. Slot-ID: ${referencingSlots[0].SlotID_Sprechend || referencingSlots[0]._id}) referenziert wird.`
             });
+        }
+
+        // --- Verknüpfungen zu Nachbarn auflösen ---
+        if (topf.TopfIDVorgänger) {
+            await Kapazitaetstopf.updateOne({ _id: topf.TopfIDVorgänger }, { $set: { TopfIDNachfolger: null } });
+            console.log(`Nachfolger-Verweis beim Vorgänger ${topf.TopfIDVorgänger} entfernt.`);
+        }
+        if (topf.TopfIDNachfolger) {
+            await Kapazitaetstopf.updateOne({ _id: topf.TopfIDNachfolger }, { $set: { TopfIDVorgänger: null } });
+            console.log(`Vorgänger-Verweis beim Nachfolger ${topf.TopfIDNachfolger} entfernt.`);
         }
         
         // Wenn keine Abhängigkeiten bestehen, Topf löschen

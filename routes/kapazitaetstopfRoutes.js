@@ -18,10 +18,15 @@ router.get('/', kapazitaetstopfController.getAllKapazitaetstoepfe);
 // @access  Public/Admin
 router.get('/:topfId', kapazitaetstopfController.getKapazitaetstopfById);
 
+// @route   PUT /api/kapazitaetstoepfe/:topfId
+// @desc    Aktualisiert einen einzelnen Kapazitätstopf anhand seiner ID (_id oder TopfID)
+// @access  Public/Admin
+router.put('/:topfId', kapazitaetstopfController.updateKapazitaetstopf);
+
 // @route   DELETE /api/kapazitaetstoepfe/:topfIdOderMongoId
 // @desc    Löscht einen Kapazitätstopf
 // @access  Admin (angenommen)
-router.delete('/:topfIdOderMongoId', kapazitaetstopfController.deleteKapazitaetstopf); // <-- NEU
+router.delete('/:topfIdOderMongoId', kapazitaetstopfController.deleteKapazitaetstopf);
 
 
 

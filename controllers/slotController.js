@@ -2,9 +2,12 @@
 const mongoose = require('mongoose');
 const Slot = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
+const kapazitaetstopfService = require('../utils/kapazitaetstopf.service'); // <-- NEUER Import
+
 
 // Hilfsfunktion: Findet oder erstellt einen Kapazitätstopf basierend auf Slot-Kriterien
 async function findOrCreateKapazitaetstopf(slotData) {
+    //console.log(slotData);
     const { Abschnitt, Kalenderwoche, Verkehrstag, Verkehrsart: slotVerkehrsart, Abfahrt } = slotData;
     const passendesZeitfenster = Slot.mapAbfahrtstundeToKapazitaetstopfZeitfenster(Abfahrt.stunde);
 
@@ -27,14 +30,15 @@ async function findOrCreateKapazitaetstopf(slotData) {
     // 3. Wenn immer noch nicht gefunden, erstelle einen neuen Topf
     if (!topf) {
         console.log(`Kein passender Kapazitätstopf gefunden. Erstelle neuen Topf mit Verkehrsart: ${slotVerkehrsart}`);
-        topf = new Kapazitaetstopf({
+        const topfDataToCreate = {
             Abschnitt, Kalenderwoche, Verkehrstag,
-            Verkehrsart: slotVerkehrsart, // Neuer Topf erhält die spezifische Verkehrsart des Slots
+            Verkehrsart: slotVerkehrsart, // Nimmt die spezifische Verkehrsart des Slots
             Zeitfenster: passendesZeitfenster,
-        });
+        };
         try {
-            await topf.save(); // TopfID und ZeitfensterStartStunde werden durch Hooks generiert
-            console.log(`Neuer Kapazitätstopf ${topf.TopfID || topf._id} erstellt.`);
+            // Hier wird jetzt die zentrale Funktion mit der Verknüpfungslogik aufgerufen!
+            topf = await kapazitaetstopfService.createAndLinkKapazitaetstopf(topfDataToCreate);
+
         } catch (createError) {
             // ... (Fehlerbehandlung wie zuvor, ggf. erneuter Find-Versuch bei unique-Kollision) ...
             if (createError.code === 11000) {
@@ -87,6 +91,7 @@ async function updateTopfSlotsAndCapacity(topfId, slotId, operationType) { // op
 // @route   POST /api/slots
 exports.createSlot = async (req, res) => {
     try {
+        //console.log(req.body);
         const { von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, Kalenderwoche, Verkehrsart, Grundentgelt } = req.body;
 
         // ... (Validierung von Pflichtfeldern und Ankunft > Abfahrt) ...
