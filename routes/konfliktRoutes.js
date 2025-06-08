@@ -60,11 +60,18 @@ router.put('/gruppen/:gruppenId/entgeltvergleich', konfliktController.fuehreGrup
 // @access  Admin/System
 router.put('/gruppen/:gruppenId/hoechstpreis-ergebnis', konfliktController.verarbeiteGruppenHoechstpreisErgebnis);
 
-// NEUE ROUTE für die Verschiebungs-Analyse
+// ROUTE für die Verschiebungs-Analyse
 // @route   GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse
 // @desc    Analysiert die Kapazität der Nachbartöpfe für eine Konfliktgruppe
 // @access  Admin/System
 router.get('/gruppen/:gruppenId/verschiebe-analyse', konfliktController.getVerschiebeAnalyseFuerGruppe);
+
+// ROUTE für die Alternativen-Analyse
+// @route   GET /api/konflikte/gruppen/:gruppenId/alternativen
+// @desc    Findet komplett freie alternative Slots für eine Konfliktgruppe
+// @access  Admin/System
+router.get('/gruppen/:gruppenId/alternativen', konfliktController.getAlternativSlotsFuerGruppe);
+
 
 
 module.exports = router;

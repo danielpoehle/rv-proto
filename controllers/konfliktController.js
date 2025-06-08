@@ -6,6 +6,11 @@ const Anfrage = require('../models/Anfrage'); // für Populate
 const Slot = require('../models/Slot'); // Benötigt, um Slot.VerweisAufTopf zu prüfen
 const KonfliktGruppe = require('../models/KonfliktGruppe');
 
+// Wichtig: Die Zeitfenster-Sequenz für die Sortierung
+const ZEITFENSTER_SEQUENZ = [
+    '01-03', '03-05', '05-07', '07-09', '09-11', '11-13', 
+    '13-15', '15-17', '17-19', '19-21', '21-23', '23-01'
+];
 
 // Diese Funktion vergleicht, ob alle IDs der Anfragen identisch sind.
 function sindObjectIdArraysGleich(arr1, arr2) {
@@ -1286,6 +1291,152 @@ exports.getVerschiebeAnalyseFuerGruppe = async (req, res) => {
 
     } catch (error) {
         console.error(`Fehler bei der Verschiebe-Analyse für Gruppe ${gruppenId}:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Analyse.' });
+    }
+};
+
+// @desc    Findet freie alternative Slots FÜR JEDE ANFRAGE in einer Konfliktgruppe
+// @route   GET /api/konflikte/gruppen/:gruppenId/alternativen
+exports.getAlternativSlotsFuerGruppe = async (req, res) => {
+    const { gruppenId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) {
+        return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    }
+
+    try {
+        // 1. Lade die Gruppe und alle relevanten, tief populierten Daten
+        const gruppe = await KonfliktGruppe.findById(gruppenId).populate({
+            path: 'beteiligteAnfragen',
+            select: 'ListeGewuenschterSlotAbschnitte AnfrageID_Sprechend EVU Zugnummer'
+        }).populate({
+            path: 'konflikteInGruppe',
+            populate: { path: 'ausloesenderKapazitaetstopf', select: 'Kalenderwoche' }
+        });
+
+        if (!gruppe || gruppe.beteiligteAnfragen.length === 0) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden oder keine beteiligten Anfragen.' });
+        }
+
+        // 2. Sammle die Kriterien für die Suche (alle Abschnitte und KWs der Gruppe)
+        const uniqueDesiredSegments = new Map();
+        const relevanteKonfliktKWs = new Set();
+        for (const anfrage of gruppe.beteiligteAnfragen) {
+            for (const konflikt of gruppe.konflikteInGruppe) {
+                if (konflikt.ausloesenderKapazitaetstopf) relevanteKonfliktKWs.add(konflikt.ausloesenderKapazitaetstopf.Kalenderwoche);
+            }
+            for (const abschnitt of anfrage.ListeGewuenschterSlotAbschnitte) {
+                const key = `${abschnitt.von}-${abschnitt.bis}`;
+                if (!uniqueDesiredSegments.has(key)) {
+                    uniqueDesiredSegments.set(key, { von: abschnitt.von, bis: abschnitt.bis });
+                }
+            }
+        }
+        
+        const desiredVonBisPairs = Array.from(uniqueDesiredSegments.values());
+
+        // 3. Finde ALLE potenziell passenden alternativen Slots für die GESAMTE Gruppe in einer Abfrage
+        const potentialAlternativeSlots = await Slot.find({
+            zugewieseneAnfragen: { $size: 0 },
+            Kalenderwoche: { $in: Array.from(relevanteKonfliktKWs) },
+            $or: desiredVonBisPairs.length > 0 ? desiredVonBisPairs : [{ _id: null }] // $or mit leerem Array vermeiden
+        }).populate({
+            path: 'VerweisAufTopf',
+            select: 'maxKapazitaet ListeDerAnfragen TopfID Zeitfenster'
+        });
+
+        const finalAlternativeSlots = potentialAlternativeSlots.filter(slot => 
+            slot.VerweisAufTopf && slot.VerweisAufTopf.ListeDerAnfragen.length < slot.VerweisAufTopf.maxKapazitaet
+        );
+
+        // 4. Baue einen Cache auf für schnellen Zugriff: KW -> AbschnittKey -> [Slots]
+        const alternativesCache = {};
+        for (const slot of finalAlternativeSlots) {
+            const kw = slot.Kalenderwoche;
+            const abschnittKey = `${slot.von}-${slot.bis}`;
+            if (!alternativesCache[kw]) alternativesCache[kw] = {};
+            if (!alternativesCache[kw][abschnittKey]) alternativesCache[kw][abschnittKey] = [];
+            alternativesCache[kw][abschnittKey].push(slot);
+        }
+
+        // 5. Erstelle die finale Antwortstruktur, indem durch jede Anfrage iteriert wird
+        const analyseErgebnisProAnfrage = [];
+
+        for (const anfrage of gruppe.beteiligteAnfragen) {
+            const alternativenFuerDieseAnfrage = {}; // Temporäres Objekt für diese Anfrage zum Gruppieren
+
+            // Iteriere durch die gewünschten Abschnitte DIESER Anfrage in ihrer korrekten Reihenfolge
+            for (const gewuenschterAbschnitt of anfrage.ListeGewuenschterSlotAbschnitte) {
+                const abschnittKey = `${gewuenschterAbschnitt.von}-${gewuenschterAbschnitt.bis}`;
+                
+                // Durchsuche die relevanten KWs
+                for (const kw of relevanteKonfliktKWs) {
+                    if (alternativesCache[kw] && alternativesCache[kw][abschnittKey]) {
+                        // Es gibt Alternativen für diesen Abschnitt in dieser KW
+                        const slotsFuerAbschnittInKw = alternativesCache[kw][abschnittKey];
+
+                        // Gruppiere die gefundenen Slots nach ihrem Kapazitätstopf
+                        for (const slot of slotsFuerAbschnittInKw) {
+                            const topf = slot.VerweisAufTopf;
+                            if (!alternativenFuerDieseAnfrage[kw]) alternativenFuerDieseAnfrage[kw] = {};
+                            if (!alternativenFuerDieseAnfrage[kw][abschnittKey]) alternativenFuerDieseAnfrage[kw][abschnittKey] = {};
+                            if (!alternativenFuerDieseAnfrage[kw][abschnittKey][topf.TopfID]) {
+                                alternativenFuerDieseAnfrage[kw][abschnittKey][topf.TopfID] = {
+                                    topfDetails: { _id: topf._id, TopfID: topf.TopfID, Zeitfenster: topf.Zeitfenster },
+                                    freieSlots: []
+                                };
+                            }
+                            alternativenFuerDieseAnfrage[kw][abschnittKey][topf.TopfID].freieSlots.push({
+                                _id: slot._id, SlotID_Sprechend: slot.SlotID_Sprechend,
+                                Abfahrt: slot.Abfahrt, Ankunft: slot.Ankunft
+                            });
+                        }
+                    }
+                }
+            } // Ende Schleife über gewünschte Abschnitte
+
+            // Konvertiere das gruppierte Objekt für diese Anfrage in die sortierte Array-Struktur
+            const sortedAlternatives = Object.keys(alternativenFuerDieseAnfrage).sort((a,b) => parseInt(a) - parseInt(b)).map(kwKey => {
+                const kw = parseInt(kwKey);
+                const abschnitteData = alternativenFuerDieseAnfrage[kw];
+                // Sortiere Abschnitte basierend auf der Reihenfolge in der Anfrage
+                const chronologischSortierteAbschnitte = [];
+                for (const gewuenschterAbschnitt of anfrage.ListeGewuenschterSlotAbschnitte) {
+                    const abschnittKey = `${gewuenschterAbschnitt.von}-${gewuenschterAbschnitt.bis}`;
+                    if(abschnitteData[abschnittKey]) {
+                        chronologischSortierteAbschnitte.push({
+                            abschnitt: abschnittKey,
+                            kapazitaetstoepfe: Object.values(abschnitteData[abschnittKey]).sort((a, b) => 
+                                ZEITFENSTER_SEQUENZ.indexOf(a.topfDetails.Zeitfenster) - ZEITFENSTER_SEQUENZ.indexOf(b.topfDetails.Zeitfenster)
+                            )
+                        });
+                        // Sortiere die Slots im Topf nach Abfahrtszeit
+                        chronologischSortierteAbschnitte[chronologischSortierteAbschnitte.length - 1].kapazitaetstoepfe.forEach(topfGruppe => {
+                             topfGruppe.freieSlots.sort((a,b) => (a.Abfahrt.stunde*60+a.Abfahrt.minute) - (b.Abfahrt.stunde*60+b.Abfahrt.minute));
+                        });
+                    }
+                }
+                return { Kalenderwoche: kw, abschnitte: chronologischSortierteAbschnitte };
+            });
+
+            analyseErgebnisProAnfrage.push({
+                anfrage: {
+                    _id: anfrage._id,
+                    AnfrageID_Sprechend: anfrage.AnfrageID_Sprechend,
+                    EVU: anfrage.EVU,
+                    Zugnummer: anfrage.Zugnummer
+                },
+                alternativen: sortedAlternatives
+            });
+        }
+
+        res.status(200).json({
+            message: `Analyse für konfliktfreie Alternativen für Gruppe ${gruppenId} erfolgreich.`,
+            data: analyseErgebnisProAnfrage
+        });
+
+    } catch (error) {
+        console.error(`Fehler bei der Alternativen-Analyse für Gruppe ${gruppenId}:`, error);
         res.status(500).json({ message: 'Serverfehler bei der Analyse.' });
     }
 };
