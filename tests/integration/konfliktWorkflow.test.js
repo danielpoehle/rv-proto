@@ -6,6 +6,7 @@ const Slot = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 const Anfrage = require('../../models/Anfrage');
 const KonfliktDokumentation = require('../../models/KonfliktDokumentation');
+const KonfliktGruppe = require('../../models/KonfliktGruppe');
 
 // Ggf. mapAbfahrtstundeToKapazitaetstopfZeitfenster importieren, falls für Topf-Erstellung benötigt
 // function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) { /* ... */ }
@@ -993,3 +994,182 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
         });  
 
     });
+
+describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
+    let kt_0507, kt_0709, kt_0911;
+    let anfragenFuerKonflikt = [];
+    let anfragenFuerBelegung = [];
+    let konfliktGruppe;
+    let konfliktGruppe2;
+
+    // Wenn du manuelle Bereinigung pro Testfall brauchst:
+        beforeAll(async () => {
+            // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
+            // Diese Verbindung muss die URI zur Docker-DB nutzen
+            await mongoose.connect(process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots');
+        });
+    
+        afterAll(async () => {
+            await mongoose.disconnect();
+        });
+
+    // Das Setup für diesen Test ist etwas umfangreicher
+    beforeEach(async () => {
+        if (mongoose.connection.readyState === 0) {
+                const testDbUri = process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots';
+                await mongoose.connect(testDbUri);
+            }
+            // Leere Collections
+            const collections = mongoose.connection.collections;
+            for (const key in collections) {
+                const collection = collections[key];
+                await collection.deleteMany({});
+            }
+
+        // 1. Erstelle die 3 Kapazitätstöpfe durch Slot-Erstellung.
+        // Alle Töpfe sollen maxKapazitaet = 2 haben (dafür jeweils 3 Slots erstellen).
+        anfragenFuerKonflikt = [];
+        anfragenFuerBelegung = [];
+
+        const commonParams = {
+            von: "Analyse-A", bis: "Analyse-B", Abschnitt: "Analyse-Strecke",
+            Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Kalenderwoche: 4, Grundentgelt: 10
+        };
+
+        // Slots für Topf 05-07
+        for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 5, minute: i*10 }, Ankunft: { stunde: 6, minute: i*10 } }); }
+        // Slots für Topf 07-09
+        for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 7, minute: i*10 }, Ankunft: { stunde: 8, minute: i*10 } }); }
+        // Slots für Topf 09-11
+        for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 9, minute: i*10 }, Ankunft: { stunde: 10, minute: i*10 } }); }
+        
+        // Töpfe aus DB laden und prüfen
+        kt_0507 = await Kapazitaetstopf.findOne({ Abschnitt: "Analyse-Strecke", Zeitfenster: "05-07", Kalenderwoche: 4 });
+        kt_0709 = await Kapazitaetstopf.findOne({ Abschnitt: "Analyse-Strecke", Zeitfenster: "07-09", Kalenderwoche: 4 });
+        kt_0911 = await Kapazitaetstopf.findOne({ Abschnitt: "Analyse-Strecke", Zeitfenster: "09-11", Kalenderwoche: 4 });
+        
+        expect(kt_0507).toBeDefined(); 
+        expect(kt_0709).toBeDefined(); 
+        expect(kt_0911).toBeDefined();
+        expect(kt_0507.maxKapazitaet).toBe(2); 
+        expect(kt_0709.maxKapazitaet).toBe(2); 
+        expect(kt_0911.maxKapazitaet).toBe(2);
+        
+        // Verknüpfung der Töpfe prüfen
+        expect(kt_0709.TopfIDVorgänger.toString()).toBe(kt_0507._id.toString());
+        expect(kt_0709.TopfIDNachfolger.toString()).toBe(kt_0911._id.toString());
+
+        // 2. Anfragen erstellen
+        const anfrageBasis = { EVU: "AnalyseEVU", Email: "analyse@evu.com", Verkehrsart: "SPFV", 
+                               Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-01-20", ende: "2025-01-26" },
+                               ListeGewuenschterSlotAbschnitte: [{von: "Analyse-A", bis:"Analyse-B", Abfahrtszeit: {stunde:7, minute:10}, Ankunftszeit:{stunde:8,minute:10}}]}; // KW 4
+        
+        // 3 Anfragen für den Konflikt in Topf 07-09
+        for(let i=1; i<=3; i++) {
+            const anfr = await new Anfrage({ ...anfrageBasis, Zugnummer: `A${i}` }).save();
+            anfragenFuerKonflikt.push(anfr);
+        }
+        // 3 Anfragen für die Belegung von Topf 09-11
+        for(let i=1; i<=3; i++) {
+            const anfr = await new Anfrage({ ...anfrageBasis, Zugnummer: `B${i}` }).save();
+            anfragenFuerBelegung.push(anfr);
+        }
+
+        // 3. Töpfe manuell mit Anfragen befüllen, um die Situation herzustellen
+        kt_0709.ListeDerAnfragen = anfragenFuerKonflikt.map(a => a._id);
+        await kt_0709.save();
+        kt_0911.ListeDerAnfragen = anfragenFuerBelegung.map(a => a._id);
+        await kt_0911.save();
+        
+        // 4. Konflikt und Gruppe identifizieren
+        await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
+
+        let r = await KonfliktGruppe.find({});
+        console.log(r);
+
+        // Erzeuge im Test den exakten Schlüssel, den wir erwarten
+        let erwarteteAnfrageIds = anfragenFuerKonflikt.map(a => a._id.toString()).sort();
+        //console.log(erwarteteAnfrageIds);
+        let erwarteterGruppenSchluessel = erwarteteAnfrageIds.join('#');
+
+        //console.log(`Erwarteter Schlüssel Gruppe 1: ${erwarteterGruppenSchluessel}`);
+
+        // Suche die Gruppe anhand dieses eindeutigen Schlüssels
+        konfliktGruppe = await KonfliktGruppe.findOne({ 
+            gruppenSchluessel: erwarteterGruppenSchluessel 
+        });
+        expect(konfliktGruppe).not.toBeNull();
+
+        erwarteteAnfrageIds = anfragenFuerBelegung.map(a => a._id.toString()).sort();
+        erwarteterGruppenSchluessel = erwarteteAnfrageIds.join('#');
+
+        //console.log(`Erwarteter Schlüssel Gruppe 2: ${erwarteterGruppenSchluessel}`);
+
+        konfliktGruppe2 = await KonfliktGruppe.findOne({ 
+            gruppenSchluessel: erwarteterGruppenSchluessel 
+        });
+        expect(konfliktGruppe2).not.toBeNull();
+    });
+
+    it('sollte die Kapazität der Nachbartöpfe korrekt als "frei" und "belegt" analysieren', async () => {
+        // Aktion: Analyse-Endpunkt aufrufen
+        const response = await request(app)
+            .get(`/api/konflikte/gruppen/${konfliktGruppe._id}/verschiebe-analyse`)
+            .send();
+
+        // Überprüfung
+        expect(response.status).toBe(200);
+        expect(response.body.data).toBeInstanceOf(Array);
+        expect(response.body.data).toHaveLength(3); // Analyse für die 3 Anfragen im Konflikt
+
+        // Überprüfe die Analyse für die erste Anfrage (die anderen sollten identisch sein)
+        const analyseFuerErsteAnfrage = response.body.data.find(a => a.anfrage._id === anfragenFuerKonflikt[0]._id.toString());
+        expect(analyseFuerErsteAnfrage).toBeDefined();
+
+        expect(analyseFuerErsteAnfrage.topfAnalysen).toHaveLength(1); // Nur ein Konflikttopf in dieser Gruppe
+        const topfAnalyse = analyseFuerErsteAnfrage.topfAnalysen[0];
+        
+        // Prüfe den auslösenden Topf
+        expect(topfAnalyse.ausloesenderTopf._id).toBe(kt_0709._id.toString());
+        
+        // Prüfe den Vorgänger (kt_0507)
+        expect(topfAnalyse.vorgänger).toBeDefined();
+        expect(topfAnalyse.vorgänger._id).toBe(kt_0507._id.toString());
+        expect(topfAnalyse.vorgänger.Status).toBe('frei'); // Da ListeDerAnfragen (0) < maxKapazitaet (2)
+
+        // Prüfe den Nachfolger (kt_0911)
+        expect(topfAnalyse.nachfolger).toBeDefined();
+        expect(topfAnalyse.nachfolger._id).toBe(kt_0911._id.toString());
+        expect(topfAnalyse.nachfolger.Status).toBe('belegt'); // Da ListeDerAnfragen (3) >== maxKapazitaet (2)
+    });
+
+    it('sollte die Kapazität der Nachbartöpfe korrekt als "belegt" und nicht existent analysieren', async () => {
+        // Aktion: Analyse-Endpunkt aufrufen
+        const response = await request(app)
+            .get(`/api/konflikte/gruppen/${konfliktGruppe2._id}/verschiebe-analyse`)
+            .send();
+
+        // Überprüfung
+        expect(response.status).toBe(200);
+        expect(response.body.data).toBeInstanceOf(Array);
+        expect(response.body.data).toHaveLength(3); // Analyse für die 3 Anfragen im Konflikt
+
+        // Überprüfe die Analyse für die erste Anfrage (die anderen sollten identisch sein)
+        const analyseFuerErsteAnfrage = response.body.data.find(a => a.anfrage._id === anfragenFuerBelegung[0]._id.toString());
+        expect(analyseFuerErsteAnfrage).toBeDefined();
+
+        expect(analyseFuerErsteAnfrage.topfAnalysen).toHaveLength(1); // Nur ein Konflikttopf in dieser Gruppe
+        const topfAnalyse = analyseFuerErsteAnfrage.topfAnalysen[0];
+        
+        // Prüfe den auslösenden Topf
+        expect(topfAnalyse.ausloesenderTopf._id).toBe(kt_0911._id.toString());
+        
+        // Prüfe den Vorgänger (kt_0709)
+        expect(topfAnalyse.vorgänger).toBeDefined();
+        expect(topfAnalyse.vorgänger._id).toBe(kt_0709._id.toString());
+        expect(topfAnalyse.vorgänger.Status).toBe('belegt'); // // Da ListeDerAnfragen (3) >== maxKapazitaet (2)
+
+        // Prüfe den Nachfolger (kt_1113) //der ist nicht existent
+        expect(topfAnalyse.nachfolger).toBeNull();
+    });
+});

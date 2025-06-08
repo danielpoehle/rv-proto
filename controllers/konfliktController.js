@@ -1176,3 +1176,116 @@ exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
         res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
      }
 };
+
+// @desc    Analysiert die Kapazität der Nachbartöpfe für eine Konfliktgruppe
+// @route   GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse
+exports.getVerschiebeAnalyseFuerGruppe = async (req, res) => {
+    const { gruppenId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) {
+        return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    }
+
+    try {
+        // 1. Lade die Gruppe und ihre Konflikte mit den zugehörigen Töpfen
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'konflikteInGruppe',
+                populate: {
+                    path: 'ausloesenderKapazitaetstopf',
+                    select: 'TopfIDVorgänger TopfIDNachfolger TopfID' // Lade Links und ID des auslösenden Topfes
+                }
+            })
+            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Zugnummer');
+
+        if (!gruppe) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        }
+
+        // 2. Sammle die IDs aller einzigartigen Vorgänger- und Nachfolger-Töpfe
+        const nachbarTopfIds = new Set();
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            const topf = konflikt.ausloesenderKapazitaetstopf;
+            if (topf) {
+                if (topf.TopfIDVorgänger) nachbarTopfIds.add(topf.TopfIDVorgänger.toString());
+                if (topf.TopfIDNachfolger) nachbarTopfIds.add(topf.TopfIDNachfolger.toString());
+            }
+        }
+
+        // 3. Lade alle Nachbar-Töpfe und ihre Kapazitätsdaten in einer einzigen Abfrage
+        const nachbarToepfeDetails = await Kapazitaetstopf.find({
+            _id: { $in: Array.from(nachbarTopfIds) }
+        }).select('maxKapazitaet ListeDerAnfragen TopfID'); // WICHTIG: TopfID mitladen
+
+        // Konvertiere die Ergebnisliste in eine Map für schnellen Zugriff
+        const nachbarToepfeMap = new Map();
+        nachbarToepfeDetails.forEach(t => nachbarToepfeMap.set(t._id.toString(), t));
+
+        // 4. Erstelle die finale Antwortstruktur
+        const analyseErgebnis = [];
+
+        // Für jede beteiligte Anfrage...
+        for (const anfrage of gruppe.beteiligteAnfragen) {
+            const anfrageAnalyse = {
+                anfrage: { // Infos zur Anfrage
+                    _id: anfrage._id,
+                    AnfrageID_Sprechend: anfrage.AnfrageID_Sprechend,
+                    EVU: anfrage.EVU,
+                    Zugnummer: anfrage.Zugnummer
+                },
+                topfAnalysen: [] // Hier kommen die Ergebnisse pro Topf rein
+            };
+
+            // ...prüfe jeden Konflikt-Topf in der Gruppe
+            for (const konflikt of gruppe.konflikteInGruppe) {
+                const topf = konflikt.ausloesenderKapazitaetstopf;
+                if (!topf) continue;
+
+                // --- NEUE STRUKTUR FÜR VORGÄNGER ---
+                let vorgängerObjekt = null; // Standardwert ist null
+                if (topf.TopfIDVorgänger) {
+                    const vorgänger = nachbarToepfeMap.get(topf.TopfIDVorgänger.toString());
+                    if (vorgänger) {
+                        vorgängerObjekt = {
+                            _id: vorgänger._id,
+                            TopfID: vorgänger.TopfID, // Sprechende ID des Vorgängers
+                            Status: vorgänger.ListeDerAnfragen.length < vorgänger.maxKapazitaet ? 'frei' : 'belegt'
+                        };
+                    }
+                }
+
+                // --- NEUE STRUKTUR FÜR NACHFOLGER ---
+                let nachfolgerObjekt = null; // Standardwert ist null
+                if (topf.TopfIDNachfolger) {
+                    const nachfolger = nachbarToepfeMap.get(topf.TopfIDNachfolger.toString());
+                    if (nachfolger) {
+                        nachfolgerObjekt = {
+                            _id: nachfolger._id,
+                            TopfID: nachfolger.TopfID, // Sprechende ID des Nachfolgers
+                            Status: nachfolger.ListeDerAnfragen.length < nachfolger.maxKapazitaet ? 'frei' : 'belegt'
+                        };
+                    }
+                }
+                
+                anfrageAnalyse.topfAnalysen.push({
+                    ausloesenderTopf: {
+                        _id: topf._id,
+                        TopfID: topf.TopfID
+                    },
+                    vorgänger: vorgängerObjekt,  // Objekt oder null
+                    nachfolger: nachfolgerObjekt // Objekt oder null
+                });
+            }
+            analyseErgebnis.push(anfrageAnalyse);
+        }
+
+        res.status(200).json({
+            message: `Verschiebe-Analyse für Gruppe ${gruppe._id} erfolgreich.`,
+            data: analyseErgebnis
+        });
+
+    } catch (error) {
+        console.error(`Fehler bei der Verschiebe-Analyse für Gruppe ${gruppenId}:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Analyse.' });
+    }
+};
