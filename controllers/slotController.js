@@ -3,6 +3,8 @@ const mongoose = require('mongoose');
 const Slot = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 const kapazitaetstopfService = require('../utils/kapazitaetstopf.service'); // <-- NEUER Import
+const { parseISO } = require('date-fns');
+const { GLOBAL_KW1_START_DATE, getGlobalRelativeKW } = require('../utils/date.helpers');
 
 
 // Hilfsfunktion: Findet oder erstellt einen Kapazitätstopf basierend auf Slot-Kriterien
@@ -396,5 +398,85 @@ exports.deleteSlot = async (req, res) => {
             return res.status(400).json({ message: 'Ungültiges ID-Format.' });
         }
         res.status(500).json({ message: 'Serverfehler beim Löschen des Slots.' });
+    }
+};
+
+// @desc    Erstellt mehrere Slots in einem Massenvorgang
+// @route   POST /api/slots/massen-erstellung
+exports.createSlotsBulk = async (req, res) => {
+    try {
+        const { 
+            von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, 
+            Grundentgelt, Verkehrsart, zeitraumStart, zeitraumEnde 
+        } = req.body;
+
+        // 1. Validierung der Eingabedaten
+        if (!von || !bis || !Abschnitt || !Abfahrt || !Ankunft || !Verkehrstag || !Grundentgelt || !Verkehrsart || !zeitraumStart || !zeitraumEnde) {
+            return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung ausfüllen.' });
+        }
+
+        const startDate = parseISO(zeitraumStart);
+        const endDate = parseISO(zeitraumEnde);
+
+        if (endDate < startDate) {
+            return res.status(400).json({ message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
+        }
+
+        // 2. Ermittle alle relevanten globalen relativen Kalenderwochen
+        const startKW = getGlobalRelativeKW(startDate);
+        const endKW = getGlobalRelativeKW(endDate);
+        if (startKW === null || endKW === null) {
+            return res.status(400).json({ message: 'Der angegebene Zeitraum liegt außerhalb des globalen Kalenders.' });
+        }
+        
+        const erstellteSlots = [];
+        const fehler = [];
+
+        // 3. Schleife durch alle KWs und Erstellung der Slots
+        for (let kw = startKW; kw <= endKW; kw++) {
+            const slotData = {
+                von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
+                Grundentgelt, Verkehrsart,
+                Kalenderwoche: kw
+            };
+
+            // Wir nutzen die Logik aus unserem `createSlot`-Controller wieder,
+            // indem wir sie in eine Service-Funktion auslagern oder hier nachbilden.
+            // Der Einfachheit halber bilden wir sie hier nach.
+            
+            try {
+                const potenziellerTopf = await findOrCreateKapazitaetstopf({ Abschnitt, Kalenderwoche: kw, Verkehrstag, Verkehrsart, Abfahrt });
+
+                const neuerSlot = new Slot({ von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
+                                             Kalenderwoche: kw, Verkehrsart, Grundentgelt,
+                                             VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null
+                });
+
+                const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
+
+                // Bidirektionale Verknüpfung: Slot zum (gefundenen oder neu erstellten) Kapazitätstopf hinzufügen
+                if (gespeicherterSlot.VerweisAufTopf) {
+                    await updateTopfSlotsAndCapacity(gespeicherterSlot.VerweisAufTopf, gespeicherterSlot._id, 'add');
+                }
+                                
+                erstellteSlots.push(gespeicherterSlot);
+
+            } catch (err) {
+                console.error(`Fehler beim Erstellen von Slot für KW ${kw}:`, err);
+                // Wenn ein Slot wegen einer unique-Verletzung (existiert schon) fehlschlägt,
+                // loggen wir den Fehler und machen mit dem nächsten weiter.
+                fehler.push(`KW ${kw}: ${err.message}`);
+            }
+        }
+
+        res.status(201).json({
+            message: `Massen-Erstellung abgeschlossen. ${erstellteSlots.length} Slots erfolgreich erstellt. ${fehler.length} Fehler aufgetreten.`,
+            erstellteSlots,
+            fehler
+        });
+
+    } catch (error) {
+        console.error('Schwerwiegender Fehler bei der Massenerstellung von Slots:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Massenerstellung.' });
     }
 };

@@ -4,33 +4,11 @@ const Anfrage = require('../models/Anfrage');
 const Slot = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 // Wichtig: date-fns installieren -> npm install date-fns
-const { addDays, differenceInCalendarWeeks, parseISO, eachDayOfInterval, getDay, isWithinInterval, startOfWeek, endOfWeek, startOfDay, endOfDay } = require('date-fns');
-const { de } = require('date-fns/locale'); // Für korrekten Wochenstart, falls nicht ISO
+const {  parseISO, eachDayOfInterval, getDay } = require('date-fns');
 const { UTCDate } = require('@date-fns/utc');
+const { getGlobalRelativeKW } = require('../utils/date.helpers'); 
 
 
-// Globale Konstante für den Start der allerersten relativen Kalenderwoche (KW 1)
-// JavaScript Monate sind 0-indiziert (Dezember = 11)
-const GLOBAL_KW1_START_DATE_ISO = "2024-12-30T00:00:00.000Z"; // Montag, 30. Dezember 2024
-const GLOBAL_KW1_START_DATE = startOfWeek(parseISO(GLOBAL_KW1_START_DATE_ISO), { weekStartsOn: 1 });
-
-// Hilfsfunktion: Berechnet die globale relative Kalenderwoche eines Datums
-function getGlobalRelativeKW(currentDateStr) {
-    try {
-        const currentDate = parseISO(currentDateStr.toISOString ? currentDateStr.toISOString() : currentDateStr); // Akzeptiert Date-Objekt oder ISO-String
-        const startOfCurrentDateWeek = startOfWeek(currentDate, { weekStartsOn: 1 });
-
-        if (startOfCurrentDateWeek < GLOBAL_KW1_START_DATE) {
-            // Datum liegt vor dem Start des globalen Kalendersystems
-            return null; // Oder Fehler werfen, je nach Anforderung
-        }
-        
-        return differenceInCalendarWeeks(startOfCurrentDateWeek, GLOBAL_KW1_START_DATE, { weekStartsOn: 1 }) + 1;
-    } catch (e) {
-        console.error("Fehler in getGlobalRelativeKW für Datum:", currentDateStr, e);
-        return null;
-    }
-}
 
 /**
  * Berechnet die Gesamtzahl der Betriebstage einer Anfrage basierend auf ihrem Zeitraum und Verkehrstag.

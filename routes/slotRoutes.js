@@ -8,6 +8,12 @@ const slotController = require('../controllers/slotController'); // Erstellen wi
 // @access  Admin (angenommen, später mit Autorisierung)
 router.post('/', slotController.createSlot);
 
+// ROUTE für die Massenerstellung
+// @route   POST /api/slots/massen-erstellung
+// @desc    Erstellt mehrere Slots basierend auf einem Muster und einem Zeitraum
+// @access  Admin (angenommen)
+router.post('/massen-erstellung', slotController.createSlotsBulk);
+
 // @route   GET /api/slots
 // @desc    Ruft alle Slots ab (mit Filter- und Sortiermöglichkeiten)
 // @access  Public/Admin

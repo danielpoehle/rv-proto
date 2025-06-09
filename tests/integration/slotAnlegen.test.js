@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const app = require('../../server'); // Pfad zu deiner server.js oder app.js
 const Slot = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
+const { parseISO, addDays, format } = require('date-fns');
+const { getGlobalRelativeKW, GLOBAL_KW1_START_DATE_ISO } = require('../../utils/date.helpers'); 
 
 // mapAbfahrtstundeToKapazitaetstopfZeitfenster - kopiere oder importiere die Funktion
 function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
@@ -273,6 +275,73 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         expect(ktMulti.ListeDerSlots.map(id => id.toString())).toContain(slotA_Id);
         expect(ktMulti.ListeDerSlots.map(id => id.toString())).toContain(slotB_Id);
         expect(ktMulti.maxKapazitaet).toBe(Math.floor(0.7 * 2)); // = 1
+    });
+
+    // TESTFALL FÜR MASSENERSTELLUNG
+    it('sollte über den /massen-erstellung Endpunkt korrekt 5 Slots für einen Zeitraum von 5 Wochen erstellen', async () => {
+        // ---- 1. Vorbereitung: Definiere das Slot-Muster und den Zeitraum ----
+        
+        // Zeitraum, der 5 globale relative KWs abdeckt (hier KW 4 bis KW 8)
+        // KW 4 2025 beginnt am 20.01.2025
+        // KW 8 2025 endet am 23.02.2025
+        const zeitraumStart = "2025-01-20";
+        const zeitraumEnde = "2025-02-23";
+
+        const payload = {
+            von: "Massen-Start",
+            bis: "Massen-Ende",
+            Abschnitt: "Massen-Strecke",
+            Abfahrt: { stunde: 10, minute: 0 },
+            Ankunft: { stunde: 11, minute: 0 },
+            Verkehrstag: "Mo-Fr",
+            Grundentgelt: 250,
+            Verkehrsart: "SGV",
+            zeitraumStart: zeitraumStart,
+            zeitraumEnde: zeitraumEnde
+        };
+
+        // ---- 2. Aktion: Rufe den Endpunkt zur Massenerstellung auf ----
+        const response = await request(app)
+            .post('/api/slots/massen-erstellung')
+            .send(payload);
+
+        // ---- 3. Überprüfung der Antwort ----
+        expect(response.status).toBe(201);
+        expect(response.body.message).toContain('5 Slots erfolgreich erstellt');
+        expect(response.body.erstellteSlots).toHaveLength(5);
+        expect(response.body.fehler).toHaveLength(0);
+
+        // ---- 4. Überprüfung direkt in der Datenbank ----
+
+        // Prüfe, ob 5 Slots mit dem korrekten Abschnitt in der DB sind
+        const erstellteSlotsDB = await Slot.find({ Abschnitt: "Massen-Strecke" });
+        expect(erstellteSlotsDB).toHaveLength(5);
+
+        // Prüfe, ob für jede erwartete KW (4, 5, 6, 7, 8) genau ein Slot erstellt wurde
+        const kws = erstellteSlotsDB.map(s => s.Kalenderwoche).sort((a,b) => a-b);
+        expect(kws).toEqual([4, 5, 6, 7, 8]);
+
+        // Stichprobenartige Prüfung eines Slots und seines Kapazitätstopfes
+        const slotFuerKW5 = erstellteSlotsDB.find(s => s.Kalenderwoche === 5);
+        expect(slotFuerKW5).toBeDefined();
+        expect(slotFuerKW5.von).toBe("Massen-Start");
+        expect(slotFuerKW5.Grundentgelt).toBe(250);
+        expect(slotFuerKW5.VerweisAufTopf).toBeDefined();
+        expect(slotFuerKW5.VerweisAufTopf).not.toBeNull();
+
+        // Überprüfe den zugehörigen, automatisch erstellten Kapazitätstopf für KW 5
+        const topfFuerKW5 = await Kapazitaetstopf.findById(slotFuerKW5.VerweisAufTopf);
+        expect(topfFuerKW5).not.toBeNull();
+        expect(topfFuerKW5.Abschnitt).toBe("Massen-Strecke");
+        expect(topfFuerKW5.Kalenderwoche).toBe(5);
+        expect(topfFuerKW5.Verkehrstag).toBe("Mo-Fr");
+        
+        // Da wir pro Topf-Definition 2 Slots im Setup der anderen Tests erstellt hatten,
+        // hier aber nur einen, sollte maxKapazitaet = 0 sein (floor(0.7*1))
+        // Aber unser Controller erstellt ja nur einen Slot pro KW, also hat ListeDerSlots Länge 1
+        expect(topfFuerKW5.ListeDerSlots).toHaveLength(1);
+        expect(topfFuerKW5.ListeDerSlots[0].toString()).toBe(slotFuerKW5._id.toString());
+        expect(topfFuerKW5.maxKapazitaet).toBe(0);
     });
 
 
