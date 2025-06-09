@@ -94,7 +94,7 @@ async function updateTopfSlotsAndCapacity(topfId, slotId, operationType) { // op
 exports.createSlot = async (req, res) => {
     try {
         //console.log(req.body);
-        const { von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, Kalenderwoche, Verkehrsart, Grundentgelt } = req.body;
+        const { von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, Kalenderwoche, Verkehrsart, Grundentgelt, Linienbezeichnung } = req.body;
 
         // ... (Validierung von Pflichtfeldern und Ankunft > Abfahrt) ...
         if (!Abschnitt) return res.status(400).json({message: 'Abschnitt ist ein Pflichtfeld.'});
@@ -105,7 +105,8 @@ exports.createSlot = async (req, res) => {
         const neuerSlot = new Slot({
             von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
             Kalenderwoche, Verkehrsart, Grundentgelt,
-            VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null
+            VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null,
+            Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
         });
 
         const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
@@ -169,7 +170,7 @@ exports.getAllSlots = async (req, res) => {
                                 .sort(sortOptions)
                                 .skip(skip)
                                 .limit(limit)
-                                .populate('KapazitaetstopfReferenzen', 'TopfID TopfName'); // Beispiel für Populate
+                                .populate('VerweisAufTopf', 'TopfID TopfName'); // Beispiel für Populate
 
         const totalSlots = await Slot.countDocuments(filter);
 
@@ -294,7 +295,7 @@ exports.updateSlot = async (req, res) => {
         const alterVerweisAufTopf = slot.VerweisAufTopf ? slot.VerweisAufTopf : null;
 
         // Update Slot properties
-        const allowedUpdates = ['von', 'bis', 'Abschnitt', 'Abfahrt', 'Ankunft', 'Verkehrstag', 'Kalenderwoche', 'Verkehrsart', 'Grundentgelt'];
+        const allowedUpdates = ['von', 'bis', 'Abschnitt', 'Abfahrt', 'Ankunft', 'Verkehrstag', 'Kalenderwoche', 'Verkehrsart', 'Grundentgelt', 'Linienbezeichnung'];
         // ... (Updates anwenden - Logik bleibt) ...
          const updates = req.body;
         let relevanteFelderGeaendert = false;
@@ -407,7 +408,8 @@ exports.createSlotsBulk = async (req, res) => {
     try {
         const { 
             von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, 
-            Grundentgelt, Verkehrsart, zeitraumStart, zeitraumEnde 
+            Grundentgelt, Verkehrsart, zeitraumStart, zeitraumEnde,
+            Linienbezeichnung 
         } = req.body;
 
         // 1. Validierung der Eingabedaten
@@ -437,7 +439,8 @@ exports.createSlotsBulk = async (req, res) => {
             const slotData = {
                 von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
                 Grundentgelt, Verkehrsart,
-                Kalenderwoche: kw
+                Kalenderwoche: kw,
+                Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
             };
 
             // Wir nutzen die Logik aus unserem `createSlot`-Controller wieder,
@@ -449,7 +452,8 @@ exports.createSlotsBulk = async (req, res) => {
 
                 const neuerSlot = new Slot({ von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
                                              Kalenderwoche: kw, Verkehrsart, Grundentgelt,
-                                             VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null
+                                             VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null,
+                                             Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
                 });
 
                 const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
@@ -458,7 +462,7 @@ exports.createSlotsBulk = async (req, res) => {
                 if (gespeicherterSlot.VerweisAufTopf) {
                     await updateTopfSlotsAndCapacity(gespeicherterSlot.VerweisAufTopf, gespeicherterSlot._id, 'add');
                 }
-                                
+
                 erstellteSlots.push(gespeicherterSlot);
 
             } catch (err) {

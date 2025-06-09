@@ -23,6 +23,7 @@ function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
 
 const slotSchema = new Schema({
     SlotID_Sprechend: { type: String, unique: true, sparse: true, index: true }, // Eindeutige, sprechende ID
+    Linienbezeichnung: { type: String, trim: true }, // optionaler Name der Linie des Slots, führt dann SlotID_Sprechend an.
     von: { type: String, required: true, index: true },
     bis: { type: String, required: true, index: true },
     Abschnitt: { type: String, required: [true, 'Der Abschnitt ist für die Topf-Zuweisung erforderlich.'], index: true }, // für die Zuordnung zu den Kapazizätstöpfen
@@ -60,10 +61,17 @@ function formatTimeForID(stunde, minute) {
 
 slotSchema.pre('save', function(next) {
     // Nur noch SlotID_Sprechend generieren
-    if (this.isNew || !this.SlotID_Sprechend || this.isModified('von') || this.isModified('bis') || this.isModified('Kalenderwoche') || this.isModified('Verkehrstag') || this.isModified('Abfahrt') || this.isModified('Verkehrsart')) {
+    if (this.isNew || !this.SlotID_Sprechend || this.isModified('Linienbezeichnung') || this.isModified('von') || this.isModified('bis') || this.isModified('Kalenderwoche') || this.isModified('Verkehrstag') || this.isModified('Abfahrt') || this.isModified('Verkehrsart')) {
         const formatTimeForID = (stunde, minute) => `${String(stunde).padStart(2, '0')}${String(minute).padStart(2, '0')}`;
         const abfahrtFormatted = formatTimeForID(this.Abfahrt.stunde, this.Abfahrt.minute);
-        this.SlotID_Sprechend = `SLOT_${this.von}_${this.bis}_KW${this.Kalenderwoche}_${this.Verkehrstag}_${abfahrtFormatted}_${this.Verkehrsart}`;
+
+        // Erzeuge ein Präfix, nur wenn eine Linienbezeichnung vorhanden ist.
+        // Leerzeichen werden durch '_' ersetzt und alles in Großbuchstaben umgewandelt.
+        const linienPrefix = this.Linienbezeichnung 
+            ? `${this.Linienbezeichnung.trim().toUpperCase().replace(/\s+/g, '_')}_` 
+            : '';
+
+        this.SlotID_Sprechend = `${linienPrefix}SLOT_${this.von}_${this.bis}_KW${this.Kalenderwoche}_${this.Verkehrstag}_${abfahrtFormatted}_${this.Verkehrsart}`;
     }
     next();
 });
