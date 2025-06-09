@@ -1306,25 +1306,36 @@ exports.getAlternativSlotsFuerGruppe = async (req, res) => {
 
     try {
         // 1. Lade die Gruppe und alle relevanten, tief populierten Daten
-        const gruppe = await KonfliktGruppe.findById(gruppenId).populate({
-            path: 'beteiligteAnfragen',
-            select: 'ListeGewuenschterSlotAbschnitte AnfrageID_Sprechend EVU Zugnummer'
-        }).populate({
-            path: 'konflikteInGruppe',
-            populate: { path: 'ausloesenderKapazitaetstopf', select: 'Kalenderwoche' }
-        });
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'konflikteInGruppe',
+                populate: {
+                    path: 'ausloesenderKapazitaetstopf',
+                    select: 'Kalenderwoche Verkehrstag'
+                }
+            })
+            .populate({
+                path: 'beteiligteAnfragen',
+                select: 'ListeGewuenschterSlotAbschnitte'
+            });
 
-        if (!gruppe || gruppe.beteiligteAnfragen.length === 0) {
-            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden oder keine beteiligten Anfragen.' });
+        if (!gruppe || gruppe.beteiligteAnfragen.length === 0 || gruppe.konflikteInGruppe.length === 0) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden oder enthält keine relevanten Informationen.' });
         }
 
-        // 2. Sammle die Kriterien für die Suche (alle Abschnitte und KWs der Gruppe)
+        // 2. Sammle die Kriterien für die Suche
         const uniqueDesiredSegments = new Map();
         const relevanteKonfliktKWs = new Set();
-        for (const anfrage of gruppe.beteiligteAnfragen) {
-            for (const konflikt of gruppe.konflikteInGruppe) {
-                if (konflikt.ausloesenderKapazitaetstopf) relevanteKonfliktKWs.add(konflikt.ausloesenderKapazitaetstopf.Kalenderwoche);
+        const relevanteVerkehrstage = new Set(); // NEU: Sammle die Verkehrstage der Konflikttöpfe
+
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            if (konflikt.ausloesenderKapazitaetstopf) {
+                relevanteKonfliktKWs.add(konflikt.ausloesenderKapazitaetstopf.Kalenderwoche);
+                relevanteVerkehrstage.add(konflikt.ausloesenderKapazitaetstopf.Verkehrstag);
             }
+        }
+
+        for (const anfrage of gruppe.beteiligteAnfragen) {
             for (const abschnitt of anfrage.ListeGewuenschterSlotAbschnitte) {
                 const key = `${abschnitt.von}-${abschnitt.bis}`;
                 if (!uniqueDesiredSegments.has(key)) {
@@ -1333,18 +1344,23 @@ exports.getAlternativSlotsFuerGruppe = async (req, res) => {
             }
         }
         
+        if (relevanteKonfliktKWs.size === 0 || uniqueDesiredSegments.size === 0 || relevanteVerkehrstage.size === 0) {
+            return res.status(200).json({ message: 'Keine relevanten Kriterien für die Analyse gefunden.', data: [] });
+        }
         const desiredVonBisPairs = Array.from(uniqueDesiredSegments.values());
 
-        // 3. Finde ALLE potenziell passenden alternativen Slots für die GESAMTE Gruppe in einer Abfrage
+        // 3. Finde alle potenziell passenden alternativen Slots mit verfeinertem Filter
         const potentialAlternativeSlots = await Slot.find({
             zugewieseneAnfragen: { $size: 0 },
             Kalenderwoche: { $in: Array.from(relevanteKonfliktKWs) },
-            $or: desiredVonBisPairs.length > 0 ? desiredVonBisPairs : [{ _id: null }] // $or mit leerem Array vermeiden
+            Verkehrstag: { $in: Array.from(relevanteVerkehrstage) }, // NEUER, EFFIZIENTER FILTER
+            $or: desiredVonBisPairs
         }).populate({
             path: 'VerweisAufTopf',
             select: 'maxKapazitaet ListeDerAnfragen TopfID Zeitfenster'
         });
 
+        // Filtere diese Slots weiter: Nur die, deren Kapazitätstopf ebenfalls frei ist
         const finalAlternativeSlots = potentialAlternativeSlots.filter(slot => 
             slot.VerweisAufTopf && slot.VerweisAufTopf.ListeDerAnfragen.length < slot.VerweisAufTopf.maxKapazitaet
         );

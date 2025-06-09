@@ -69,6 +69,13 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
                 }
             }
         }
+
+        //zusätzlich einen Slot SPNV, der von keiner Anfrage genutzt werden kann, erzeugen. Dieser Slot darf später nicht in den verfügbaren Alternativen auftauchen.
+        const abschnitt = "A-X";
+        const [von, bis] = abschnitt.split('-');
+        const slotData = { von, bis, Abschnitt: abschnitt, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", Grundentgelt: commonParams.grundentgelt, Abfahrt: { stunde: 9, minute: 25 }, Ankunft: { stunde: 10, minute: 55 } };
+        await request(app).post('/api/slots').send({ ...slotData, });
+        
         console.log("TEST SETUP: Slots erstellt.");
 
         // Anfragen erstellen
@@ -126,6 +133,8 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         const analyseFuerAnfrage1 = analyseData.find(a => a.anfrage._id === anfragenIdsFuerGruppe[0].toString());
         expect(analyseFuerAnfrage1).toBeDefined();
 
+        //console.log(JSON.stringify(analyseFuerAnfrage1)); 
+
         // Die Antwort sollte Alternativen für die KWs 2, 3 und 4 enthalten
         expect(analyseFuerAnfrage1.alternativen.map(a => a.Kalenderwoche).sort()).toEqual([2, 3, 4]);
 
@@ -142,7 +151,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         expect(alternativen_AX_KW2).toBeDefined();
         const abschn_toepfe = alternativen_AX_KW2.kapazitaetstoepfe.map(a => a.topfDetails.TopfID);
 
-        expect(abschn_toepfe).toHaveLength(6); //Mo-Fr 11-13,13-15,15-17 und Sa+So 11-13,13-15,15-17
+        expect(abschn_toepfe).toHaveLength(3); //nur Mo-Fr 11-13,13-15,15-17, da Konflittöpfe inkl Anfrage 4 nur am Mo-Fr sind
 
         // Es sollte ein Kapazitätstopf für das Zeitfenster 15-17 gefunden werden
         const topf_1517 = alternativen_AX_KW2.kapazitaetstoepfe.find(t => t.topfDetails.Zeitfenster === "15-17");
@@ -156,6 +165,50 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         expect(topf_1517.freieSlots[1].Abfahrt.stunde).toBe(15);
         expect(topf_1517.freieSlots[1].Abfahrt.minute).toBe(20);
         expect(topf_1517.freieSlots[2].Abfahrt.stunde).toBe(15);
-        expect(topf_1517.freieSlots[2].Abfahrt.minute).toBe(40);        
+        expect(topf_1517.freieSlots[2].Abfahrt.minute).toBe(40);  
+        
+        // Überprüfe das Ergebnis für die vierte Anfrage
+        const analyseFuerAnfrage4 = analyseData.find(a => a.anfrage._id === anfragenIdsFuerGruppe[3].toString());
+        expect(analyseFuerAnfrage4).toBeDefined();
+
+        // Die Antwort sollte Alternativen für die KWs 2, 3 und 4 enthalten
+        expect(analyseFuerAnfrage4.alternativen.map(a => a.Kalenderwoche).sort()).toEqual([2, 3, 4]);
+
+        // Überprüfe die Struktur für KW 3
+        const alternativenKW3 = analyseFuerAnfrage4.alternativen.find(a => a.Kalenderwoche === 3);
+        expect(alternativenKW3).toBeDefined();
+
+        // Die Abschnitte sollten in der Reihenfolge der Anfrage (X-B, B-C) sortiert sein
+        const abschnittsReihenfolge4 = alternativenKW3.abschnitte.map(a => a.abschnitt);
+        expect(abschnittsReihenfolge4).toEqual(["X-B", "B-C"]);
+
+        // Überprüfe die Alternativen für den Abschnitt B-C in KW 3
+        const alternativen_BC_KW3 = alternativenKW3.abschnitte.find(a => a.abschnitt === "B-C");
+        expect(alternativen_BC_KW3).toBeDefined();
+        const abschn_toepfe4 = alternativen_BC_KW3.kapazitaetstoepfe.map(a => a.topfDetails.TopfID);
+        expect(abschn_toepfe4).toHaveLength(3); //nur Mo-Fr 9-11,11-13,15-17
+
+        // Es sollte ein Kapazitätstopf für das Zeitfenster 11-13 gefunden werden
+        const topf_1113 = alternativen_BC_KW3.kapazitaetstoepfe.find(t => t.topfDetails.Zeitfenster === "11-13");
+        expect(topf_1113).toBeDefined();
+
+        // Es sollte ein Kapazitätstopf für das Zeitfenster 09-11 gefunden werden
+        const topf_0911 = alternativen_BC_KW3.kapazitaetstoepfe.find(t => t.topfDetails.Zeitfenster === "09-11");
+        expect(topf_0911).toBeDefined();
+        expect(topf_0911.freieSlots).toHaveLength(3);
+
+        // Es sollte ein Kapazitätstopf für das Zeitfenster 15-17 gefunden werden
+        const topf_1517_4 = alternativen_BC_KW3.kapazitaetstoepfe.find(t => t.topfDetails.Zeitfenster === "15-17");
+        expect(topf_1517_4).toBeDefined();
+        expect(topf_1517_4.freieSlots).toHaveLength(3);
+
+        // Dieser Topf sollte 3 freie alternative Slots enthalten (11:00, 11:20, 11:40)
+        expect(topf_1113.freieSlots).toHaveLength(3);
+        expect(topf_1113.freieSlots[0].Abfahrt.stunde).toBe(11);
+        expect(topf_1113.freieSlots[0].Abfahrt.minute).toBe(0);
+        expect(topf_1113.freieSlots[1].Abfahrt.stunde).toBe(11);
+        expect(topf_1113.freieSlots[1].Abfahrt.minute).toBe(20);
+        expect(topf_1113.freieSlots[2].Abfahrt.stunde).toBe(11);
+        expect(topf_1113.freieSlots[2].Abfahrt.minute).toBe(40); 
     });
 });
