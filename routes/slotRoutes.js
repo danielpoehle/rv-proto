@@ -14,6 +14,12 @@ router.post('/', slotController.createSlot);
 // @access  Admin (angenommen)
 router.post('/massen-erstellung', slotController.createSlotsBulk);
 
+// ROUTE für die statistische Zusammenfassung der Slots
+// @route   GET /api/slots/summary
+// @desc    Liefert eine aggregierte Zusammenfassung aller Slots
+// @access  Admin (angenommen)
+router.get('/summary', slotController.getSlotSummary);
+
 // @route   GET /api/slots
 // @desc    Ruft alle Slots ab (mit Filter- und Sortiermöglichkeiten)
 // @access  Public/Admin

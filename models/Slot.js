@@ -23,7 +23,7 @@ function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
 
 const slotSchema = new Schema({
     SlotID_Sprechend: { type: String, unique: true, sparse: true, index: true }, // Eindeutige, sprechende ID
-    Linienbezeichnung: { type: String, trim: true }, // optionaler Name der Linie des Slots, führt dann SlotID_Sprechend an.
+    Linienbezeichnung: { type: String, trim: true, default: '' }, // optionaler Name der Linie des Slots, führt dann SlotID_Sprechend an.
     von: { type: String, required: true, index: true },
     bis: { type: String, required: true, index: true },
     Abschnitt: { type: String, required: [true, 'Der Abschnitt ist für die Topf-Zuweisung erforderlich.'], index: true }, // für die Zuordnung zu den Kapazizätstöpfen

@@ -1,34 +1,29 @@
-// slot-buchungs-app/routes/kapazitaetstopfRoutes.js
 const express = require('express');
 const router = express.Router();
-const kapazitaetstopfController = require('../controllers/kapazitaetstopfController'); // Erstellen wir als Nächstes
+const kapazitaetstopfController = require('../controllers/kapazitaetstopfController');
 
-// @route   POST /api/kapazitaetstoepfe
-// @desc    Erstellt einen neuen Kapazitätstopf
-// @access  Admin (angenommen)
-router.post('/', kapazitaetstopfController.createKapazitaetstopf);
+// --- Routen für die gesamte Collection (/api/kapazitaetstoepfe) ---
+router.route('/')
+    .get(kapazitaetstopfController.getAllKapazitaetstoepfe) // Handler für GET /
+    .post(kapazitaetstopfController.createKapazitaetstopf); // Handler für POST /
 
-// @route   GET /api/kapazitaetstoepfe
-// @desc    Ruft alle Kapazitätstöpfe ab
-// @access  Public/Admin
-router.get('/', kapazitaetstopfController.getAllKapazitaetstoepfe);
-
-// @route   GET /api/kapazitaetstoepfe/:topfId
-// @desc    Ruft einen einzelnen Kapazitätstopf anhand seiner ID (_id oder TopfID) ab
-// @access  Public/Admin
-router.get('/:topfId', kapazitaetstopfController.getKapazitaetstopfById);
-
-// @route   PUT /api/kapazitaetstoepfe/:topfId
-// @desc    Aktualisiert einen einzelnen Kapazitätstopf anhand seiner ID (_id oder TopfID)
-// @access  Public/Admin
-router.put('/:topfId', kapazitaetstopfController.updateKapazitaetstopf);
-
-// @route   DELETE /api/kapazitaetstoepfe/:topfIdOderMongoId
-// @desc    Löscht einen Kapazitätstopf
-// @access  Admin (angenommen)
-router.delete('/:topfIdOderMongoId', kapazitaetstopfController.deleteKapazitaetstopf);
+// --- Spezifische Sub-Routen (kommen vor den dynamischen Routen) ---
+router.route('/summary')
+    .get(kapazitaetstopfController.getKapazitaetstopfSummary); // Handler für GET /summary
 
 
+// --- Routen für ein spezifisches Dokument (/api/kapazitaetstoepfe/:topfId) ---
+// Wichtig: Diese dynamische Route kommt nach allen statischen Routen.
+router.route('/:topfIdOderMongoId')
+    .get(kapazitaetstopfController.getKapazitaetstopfById)      // Handler für GET /:id
+    .put(kapazitaetstopfController.updateKapazitaetstopf)      // Handler für PUT /:id
+    .delete(kapazitaetstopfController.deleteKapazitaetstopf);  // Handler für DELETE /:id
+    // Hinweis: Ich habe den Parameter einheitlich auf ':topfIdOderMongoId' gesetzt für Konsistenz.
+    // Bitte stelle sicher, dass du in deinen Controllern dann auch `req.params.topfIdOderMongoId` verwendest.
 
+// --- Spezifische Aktionen für ein Dokument ---
+//router.route('/:topfIdOderMongoId/slots')
+//    .put(kapazitaetstopfController.setSlotsForKapazitaetstopf)      // Handler für PUT /:id/slots
+//    .post(kapazitaetstopfController.addSingleSlotToKapazitaetstopf); // Handler für POST /:id/slots
 
 module.exports = router;

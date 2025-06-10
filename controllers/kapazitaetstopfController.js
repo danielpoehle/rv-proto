@@ -95,8 +95,17 @@ exports.getKapazitaetstopfById = async (req, res) => {
         }
 
         const topf = await Kapazitaetstopf.findOne({ $or: queryConditions })
-            .populate('ListeDerSlots', 'SlotID_Sprechend von bis Abfahrt Ankunft Verkehrsart')
-            .populate('ListeDerAnfragen', 'AnfrageID_Sprechend Zugnummer EVU Status');
+            .populate({
+                path: 'ListeDerSlots', // Lade die zugeordneten Slots
+                select: 'SlotID_Sprechend Linienbezeichnung Abschnitt zugewieseneAnfragen' // Wähle die benötigten Felder
+            })
+            .populate({
+                path: 'ListeDerAnfragen', // Lade die zugeordneten Anfragen
+                select: 'AnfrageID_Sprechend Status' // Wähle die benötigten Felder
+            })
+            .populate('TopfIDVorgänger', 'TopfID') // Lade die sprechende ID des Vorgängers
+            .populate('TopfIDNachfolger', 'TopfID'); // Lade die sprechende ID des Nachfolgers
+
 
         if (!topf) {
             return res.status(404).json({ message: 'Kapazitätstopf nicht gefunden.' });
@@ -257,5 +266,67 @@ exports.deleteKapazitaetstopf = async (req, res) => {
             return res.status(400).json({ message: 'Ungültiges ID-Format.' });
         }
         res.status(500).json({ message: 'Serverfehler beim Löschen des Kapazitätstopfes.' });
+    }
+};
+
+// @desc    Liefert eine aggregierte Zusammenfassung aller Kapazitätstöpfe
+// @route   GET /api/kapazitaetstoepfe/summary
+exports.getKapazitaetstopfSummary = async (req, res) => {
+    try {
+        const summary = await Kapazitaetstopf.aggregate([
+            // Stufe 1: Füge ein temporäres Feld hinzu, um zu prüfen, ob der Topf überbucht ist.
+            {
+                $addFields: {
+                    isOverbooked: { 
+                        $gt: [ { $size: { "$ifNull": [ "$ListeDerAnfragen", [] ] } }, "$maxKapazitaet" ] 
+                    }
+                }
+            },
+            // Stufe 2: Gruppiere alle Dokumente nach dem Feld "Abschnitt".
+            {
+                $group: {
+                    _id: { // Zusammengesetzter Schlüssel
+                        abschnitt: "$Abschnitt",
+                        verkehrsart: "$Verkehrsart"
+                    },
+                    anzahlToepfe: { $sum: 1 },
+                    minKW: { $min: "$Kalenderwoche" },
+                    maxKW: { $max: "$Kalenderwoche" },
+                    konfliktAnzahl: {
+                        $sum: { $cond: [ "$isOverbooked", 1, 0 ] }
+                    }
+                    // Das Feld "verkehrsarten: { $addToSet: ... }" wird nicht mehr benötigt.
+                }
+            },
+            // Stufe 3: Formatiere das Ausgabe-Dokument für eine saubere Antwort.
+            {
+                $project: {
+                    _id: 0, // Die technische _id entfernen
+                    abschnitt: "$_id.abschnitt", // Feld aus dem Gruppierungsschlüssel extrahieren
+                    verkehrsart: "$_id.verkehrsart", // Feld aus dem Gruppierungsschlüssel extrahieren
+                    anzahlToepfe: 1,
+                    minKW: 1,
+                    maxKW: 1,
+                    mitKonflikt: "$konfliktAnzahl",
+                    ohneKonflikt: { $subtract: ["$anzahlToepfe", "$konfliktAnzahl"] }
+                }
+            },
+            // Stufe 4: Sortiere das Endergebnis alphabetisch nach Abschnitt und Verkehrsart.
+            {
+                $sort: {
+                    abschnitt: 1, // Zuerst nach Abschnitt sortieren
+                    verkehrsart: 1 // Dann innerhalb des Abschnitts nach Verkehrsart
+                }
+            }
+        ]);
+
+        res.status(200).json({
+            message: 'Zusammenfassung der Kapazitätstöpfe erfolgreich abgerufen.',
+            data: summary
+        });
+
+    } catch (error) {
+        console.error('Fehler bei der Erstellung der Kapazitätstopf-Zusammenfassung:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
     }
 };

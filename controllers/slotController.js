@@ -195,13 +195,16 @@ exports.getSlotById = async (req, res) => {
         const slotIdParam = req.params.slotId;
         let queryConditions = [];
 
+        // Suche nach SlotID_Sprechend oder der technischen _id
         queryConditions.push({ SlotID_Sprechend: slotIdParam });
         if (mongoose.Types.ObjectId.isValid(slotIdParam)) {
             queryConditions.push({ _id: slotIdParam });
         }
 
         const slot = await Slot.findOne({ $or: queryConditions })
-                               .populate('KapazitaetstopfReferenzen', 'TopfID TopfName'); // Beispiel
+            .populate('VerweisAufTopf', 'TopfID maxKapazitaet') // Lade den zugehörigen Topf und wähle nur das Feld 'TopfID' aus
+            .populate('zugewieseneAnfragen', 'AnfrageID_Sprechend Status'); // Lade die Anfragen und wähle nur die 'AnfrageID_Sprechend'
+
 
         if (!slot) {
             return res.status(404).json({ message: 'Slot nicht gefunden.' });
@@ -482,5 +485,86 @@ exports.createSlotsBulk = async (req, res) => {
     } catch (error) {
         console.error('Schwerwiegender Fehler bei der Massenerstellung von Slots:', error);
         res.status(500).json({ message: 'Serverfehler bei der Massenerstellung.' });
+    }
+};
+
+// @desc    Liefert eine aggregierte Zusammenfassung aller Slots
+// @route   GET /api/slots/summary
+exports.getSlotSummary = async (req, res) => {
+    try {
+        const summary = await Slot.aggregate([
+            // Stufe 1: Berücksichtige nur Slots, die eine Linienbezeichnung haben.
+            {
+                $match: {
+                    Linienbezeichnung: { $exists: true, $ne: null }
+                }
+            },
+            // Stufe 2: Füge ein temporäres Feld für den Belegungsstatus hinzu.
+            {
+                $addFields: {
+                    belegungsStatus: {
+                        $switch: {
+                            branches: [
+                                { case: { $eq: [{ $size: "$zugewieseneAnfragen" }, 0] }, then: "frei" },
+                                { case: { $eq: [{ $size: "$zugewieseneAnfragen" }, 1] }, then: "einfach_belegt" }
+                            ],
+                            default: "mehrfach_belegt"
+                        }
+                    }
+                }
+            },
+            // Stufe 3: Gruppiere nach dem zusammengesetzten Schlüssel.
+            {
+                $group: {
+                    _id: {
+                        linie: "$Linienbezeichnung",
+                        abschnitt: "$Abschnitt",
+                        verkehrsart: "$Verkehrsart",
+                        verkehrstag: "$Verkehrstag"
+                    },
+                    anzahlSlots: { $sum: 1 },
+                    minKW: { $min: "$Kalenderwoche" },
+                    maxKW: { $max: "$Kalenderwoche" },
+                    anzahlFrei: { $sum: { $cond: [{ $eq: ["$belegungsStatus", "frei"] }, 1, 0] } },
+                    anzahlEinfachBelegt: { $sum: { $cond: [{ $eq: ["$belegungsStatus", "einfach_belegt"] }, 1, 0] } },
+                    anzahlMehrfachBelegt: { $sum: { $cond: [{ $eq: ["$belegungsStatus", "mehrfach_belegt"] }, 1, 0] } }
+                }
+            },
+            // Stufe 4: Formatiere die Ausgabe.
+            {
+                $project: {
+                    _id: 0,
+                    linie: "$_id.linie",
+                    abschnitt: "$_id.abschnitt",
+                    verkehrsart: "$_id.verkehrsart",
+                    verkehrstag: "$_id.verkehrstag",
+                    anzahlSlots: 1,
+                    minKW: 1,
+                    maxKW: 1,
+                    belegung: { // Gruppiere die Belegungszahlen in ein Objekt
+                        frei: "$anzahlFrei",
+                        einfach: "$anzahlEinfachBelegt",
+                        mehrfach: "$anzahlMehrfachBelegt"
+                    }
+                }
+            },
+            // Stufe 5: Sortiere das Endergebnis.
+            {
+                $sort: {
+                    linie: 1,
+                    abschnitt: 1,
+                    verkehrstag: 1
+                }
+            }
+        ]);
+
+        res.status(200).json({
+            message: 'Zusammenfassung der Slots erfolgreich abgerufen.',
+            data: summary
+        });
+
+    } catch (error) {
+        console.error('Fehler bei der Erstellung der Slot-Zusammenfassung:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
     }
 };
