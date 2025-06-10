@@ -8,6 +8,12 @@ const anfrageController = require('../controllers/anfrageController');
 // @access  Public
 router.post('/', anfrageController.createAnfrage);
 
+// ROUTE für die Zusammenfassung aller Anfragen
+// @route   GET /api/anfragen/summary
+// @desc    Liefert eine aggregierte Zusammenfassung aller Anfragen
+// @access  Admin (angenommen)
+router.get('/summary', anfrageController.getAnfrageSummary);
+
 // @route   POST /api/anfragen/:anfrageId/zuordnen
 // @desc    Funktion sucht die passenden Slots der Anfrage heraus und belegt sie mit Konflikt
 // @access  Public

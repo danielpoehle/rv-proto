@@ -7,6 +7,8 @@ const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 const {  parseISO, eachDayOfInterval, getDay } = require('date-fns');
 const { UTCDate } = require('@date-fns/utc');
 const { getGlobalRelativeKW } = require('../utils/date.helpers'); 
+const KonfliktDokumentation = require('../models/KonfliktDokumentation'); // Benötigt für Konflikt-Prüfung
+
 
 
 
@@ -282,7 +284,7 @@ exports.getAllAnfragen = async (req, res) => {
     try {
         const queryParams = req.query;
         let filter = {};
-        let sortOptions = {};
+        let sortOptions = {createdAt: -1};
 
         // Filter-Logik
         if (queryParams.status) {
@@ -325,13 +327,62 @@ exports.getAllAnfragen = async (req, res) => {
         const anfragen = await Anfrage.find(filter)
                                       .sort(sortOptions)
                                       .skip(skip)
-                                      .limit(limit);
+                                      .limit(limit)
+                                      .populate({ // Lade die Slot-Referenzen und deren Verweis auf den Topf
+                                          path: 'ZugewieseneSlots.slot',
+                                          select: 'VerweisAufTopf zugewieseneAnfragen'
+                                      })
+                                      .lean(); // .lean() für schnellere, reine JS-Objekte
 
         const totalAnfragen = await Anfrage.countDocuments(filter);
 
+        // Schritt 2: Daten für jede Anfrage anreichern
+        const anfragenMitStats = [];
+        for (const anfrage of anfragen) {
+            // Finde alle einzigartigen Kapazitätstöpfe, die dieser Anfrage zugeordnet sind
+            const zugewieseneTopfIds = new Set();
+            if (anfrage.ZugewieseneSlots) {
+                anfrage.ZugewieseneSlots.forEach(zs => {
+                    if (zs.slot && zs.slot.VerweisAufTopf) {
+                        zugewieseneTopfIds.add(zs.slot.VerweisAufTopf.toString());
+                    }
+                });
+            }
+
+            // Finde offene Konflikte für diese Töpfe, an denen DIESE Anfrage beteiligt ist
+            const topfKonflikte = await KonfliktDokumentation.countDocuments({
+                konfliktTyp: 'KAPAZITAETSTOPF',
+                status: { $ne: 'geloest' }, // z.B. 'offen', 'in_bearbeitung', etc.
+                ausloesenderKapazitaetstopf: { $in: Array.from(zugewieseneTopfIds) },
+                beteiligteAnfragen: anfrage._id
+            });
+
+            // Finde Slot-Konflikte (mehr als eine Zuweisung) für die Slots dieser Anfrage
+            let slotKonfliktAnzahl = 0;
+            if (anfrage.ZugewieseneSlots) {
+                anfrage.ZugewieseneSlots.forEach(zs => {
+                    // Prüfe, ob der Slot mehr als eine zugewiesene Anfrage hat
+                    if (zs.slot && zs.slot.zugewieseneAnfragen && zs.slot.zugewieseneAnfragen.length > 1) {
+                        slotKonfliktAnzahl++;
+                    }
+                });
+            }
+
+            anfragenMitStats.push({
+                ...anfrage, // Alle ursprünglichen Anfrage-Daten
+                statistik: { // Neues Objekt mit den berechneten Statistiken
+                    anzahlZugewiesenerSlots: anfrage.ZugewieseneSlots?.length || 0,
+                    anzahlKonfliktSlots: slotKonfliktAnzahl,
+                    anzahlZugewiesenerToepfe: zugewieseneTopfIds.size,
+                    anzahlKonfliktToepfe: topfKonflikte
+                }
+            });
+        }
+
+
         res.status(200).json({
             message: 'Anfragen erfolgreich abgerufen.',
-            data: anfragen,
+            data: anfragenMitStats,
             currentPage: page,
             totalPages: Math.ceil(totalAnfragen / limit),
             totalCount: totalAnfragen
@@ -359,7 +410,17 @@ exports.getAnfrageById = async (req, res) => {
         }
 
         // Finde die Anfrage, die entweder der _id ODER der AnfrageID_Sprechend entspricht
-        const anfrage = await Anfrage.findOne({ $or: queryConditions });
+        const anfrage = await Anfrage.findOne({ $or: queryConditions })
+            .populate({
+                path: 'ZugewieseneSlots.slot', // Greife auf das 'slot'-Feld im Array zu
+                model: 'Slot', // Gib das Modell explizit an
+                select: 'SlotID_Sprechend Linienbezeichnung Abschnitt VerweisAufTopf', // Wähle die Felder des Slots aus
+                populate: { // Verschachteltes Populate für den Kapazitätstopf des Slots
+                    path: 'VerweisAufTopf',
+                    model: 'Kapazitaetstopf',
+                    select: 'TopfID maxKapazitaet ListeDerAnfragen' // Wähle die Felder des Topfes aus
+                }
+            });
 
         if (!anfrage) {
             return res.status(404).json({ message: 'Anfrage nicht gefunden.' });
@@ -617,5 +678,66 @@ exports.zuordneSlotsZuAnfrage = async (req, res) => {
             console.error("Konnte Anfrage-Status nach Zuordnungsfehler nicht aktualisieren:", saveError);
         }
         res.status(500).json({ message: 'Serverfehler beim Zuordnen der Slots.' });
+    }
+};
+
+// @desc    Liefert eine aggregierte Zusammenfassung aller Anfragen nach EVU, Verkehrsart und Status
+// @route   GET /api/anfragen/summary
+exports.getAnfrageSummary = async (req, res) => {
+    try {
+        const summary = await Anfrage.aggregate([
+            // Stufe 1: Gruppiere alle Dokumente nach Verkehrsart UND EVU.
+            {
+                $group: {
+                    _id: {
+                        verkehrsart: "$Verkehrsart",
+                        evu: "$EVU"
+                    },
+                    totalAnfragen: { $sum: 1 }, // Zähle die Gesamtzahl der Anfragen in dieser Gruppe
+                    // Sammle alle Statuswerte dieser Gruppe in einem Array
+                    statusListe: { $push: "$Status" } 
+                }
+            },
+            // Stufe 2: Formatiere die Ausgabe und zähle die Vorkommen jedes Status.
+            {
+                $project: {
+                    _id: 0,
+                    verkehrsart: "$_id.verkehrsart",
+                    evu: "$_id.evu",
+                    totalAnfragen: 1,
+                    statusCounts: { // Erzeuge ein Objekt mit den Zählerständen pro Status
+                        validiert: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "validiert"] } } }
+                        },
+                        inKonflikt: { // Fasst alle "in Arbeit"-Status zusammen
+                            $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['in_konfliktloesung_topf', 'in_konfliktloesung_slot', 'teilweise_bestaetigt_topf']] } } }
+                        },
+                        bestaetigt: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "vollstaendig_final_bestaetigt"] } } }
+                        },
+                        abgelehnt: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "final_abgelehnt"] } } }
+                        },
+                        // Man könnte hier noch weitere Status-Gruppen hinzufügen
+                    }
+                }
+            },
+            // Stufe 3: Sortiere das Endergebnis
+            {
+                $sort: {
+                    verkehrsart: 1,
+                    evu: 1
+                }
+            }
+        ]);
+
+        res.status(200).json({
+            message: 'Zusammenfassung der Anfragen erfolgreich abgerufen.',
+            data: summary
+        });
+
+    } catch (error) {
+        console.error('Fehler bei der Erstellung der Anfragen-Zusammenfassung:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
     }
 };
