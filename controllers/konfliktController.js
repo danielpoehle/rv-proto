@@ -5,6 +5,7 @@ const KonfliktDokumentation = require('../models/KonfliktDokumentation');
 const Anfrage = require('../models/Anfrage'); // für Populate
 const Slot = require('../models/Slot'); // Benötigt, um Slot.VerweisAufTopf zu prüfen
 const KonfliktGruppe = require('../models/KonfliktGruppe');
+const konfliktService = require('../utils/konflikt.service');
 
 // Wichtig: Die Zeitfenster-Sequenz für die Sortierung
 const ZEITFENSTER_SEQUENZ = [
@@ -73,58 +74,6 @@ async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, au
         console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
     }
     return anfrageDoc;
-};
-
-// HILFSFUNKTION zum Erstellen/Aktualisieren von Konfliktgruppen
-async function aktualisiereKonfliktGruppen() {
-    console.log("Starte Synchronisation der Konfliktgruppen...");
-    
-    try {
-        // 1. Finde alle Konfliktdokumente, die noch nicht final gelöst sind
-        const relevanteKonflikte = await KonfliktDokumentation.find({ 
-            status: { $nin: ['geloest', 'eskaliert'] } 
-        }).select('beteiligteAnfragen');
-
-        const gruppenMap = new Map();
-
-        // 2. Gruppiere die Konflikte in-memory nach der exakten Zusammensetzung der beteiligten Anfragen
-        for (const konflikt of relevanteKonflikte) {
-            if (!konflikt.beteiligteAnfragen || konflikt.beteiligteAnfragen.length === 0) continue;
-            
-            const anfrageIdsStrings = konflikt.beteiligteAnfragen.map(a => a.toString()).sort();
-            const gruppenSchluessel = anfrageIdsStrings.join('#');
-            
-            if (!gruppenMap.has(gruppenSchluessel)) {
-                gruppenMap.set(gruppenSchluessel, {
-                    beteiligteAnfragen: konflikt.beteiligteAnfragen,
-                    konflikteInGruppe: []
-                });
-            }
-            gruppenMap.get(gruppenSchluessel).konflikteInGruppe.push(konflikt._id);
-        }
-
-        // 3. Führe für jede gefundene Gruppe ein "Upsert" (Update or Insert) in der DB durch
-        for (const [gruppenSchluessel, gruppe] of gruppenMap.entries()) {
-            await KonfliktGruppe.findOneAndUpdate(
-                { gruppenSchluessel: gruppenSchluessel }, // Finde Gruppe mit diesem eindeutigen Schlüssel
-                { 
-                    $set: { // Setze/Aktualisiere diese Felder immer
-                        beteiligteAnfragen: gruppe.beteiligteAnfragen,
-                        konflikteInGruppe: gruppe.konflikteInGruppe
-                    },
-                    $setOnInsert: { // Nur beim erstmaligen Erstellen setzen
-                        status: 'offen' 
-                    }
-                },
-                { upsert: true, new: true }
-            );
-        }        
-
-        console.log(`Synchronisation abgeschlossen. ${gruppenMap.size} Konfliktgruppen in der DB.`);
-    } catch (err) {
-        console.error("Fehler bei der Synchronisation der Konfliktgruppen:", err);
-        // Dieser Fehler sollte das Ergebnis des Hauptprozesses nicht unbedingt blockieren, aber geloggt werden.
-    }
 };
 
 /**
@@ -536,7 +485,8 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
             }
         }
 
-        await aktualisiereKonfliktGruppen(); // Rufe die Hilfsfunktion auf, um Gruppen zu synchronisieren
+        // AM ENDE der Funktion: Rufe die Service-Funktion auf, um die Gruppen zu synchronisieren
+        await konfliktService.aktualisiereKonfliktGruppen();
         
 
         res.status(200).json({

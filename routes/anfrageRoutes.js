@@ -14,10 +14,17 @@ router.post('/', anfrageController.createAnfrage);
 // @access  Admin (angenommen)
 router.get('/summary', anfrageController.getAnfrageSummary);
 
+
+// ROUTE für die Massen-Zuweisung
+// @route   POST /api/anfragen/zuordnen/alle-validierten
+// @desc    Startet den Zuordnungsprozess für alle Anfragen mit Status 'validiert'
+router.post('/zuordnen/alle-validierten', anfrageController.zuordneAlleValidiertenAnfragen);
+
+
 // @route   POST /api/anfragen/:anfrageId/zuordnen
 // @desc    Funktion sucht die passenden Slots der Anfrage heraus und belegt sie mit Konflikt
 // @access  Public
-router.post('/:anfrageId/zuordnen', anfrageController.zuordneSlotsZuAnfrage);
+router.post('/:anfrageId/zuordnen', anfrageController.zuordneEinzelneAnfrage);
 
 // @route   GET /api/anfragen
 // @desc    Ruft alle Anfragen ab (mit Filter- und Sortiermöglichkeiten)
