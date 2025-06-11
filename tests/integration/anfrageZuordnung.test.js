@@ -340,6 +340,180 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         const erwartetesEntgelt = 14 * (150 + 150); // 14 Tage * (Grundentgelt SlotTyp1 + Grundentgelt SlotTyp2)
         expect(aktualisierteAnfrage.Entgelt).toBe(erwartetesEntgelt);
     });
+
+    // Testfall für 3 Anfragen und die Massen-Zuordnung mit dem neuen Endpunkt
+    it('Szenario C (Massen-Operation): 3 Tägliche Anfragen (1 Abschnitt) über 2 KWs auf 4 Töpfe', async () => {
+        // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
+        const commonSlotParams = {
+            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor",
+            Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 9, minute: 0 },
+            Verkehrsart: "SPFV", Grundentgelt: 150
+        };
+
+        // Slots für KW1 (global relativ)
+        const slotMoFrKW1Data = { ...commonSlotParams, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW1Data = { ...commonSlotParams, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
+        // Slots für KW2 (global relativ)
+        const slotMoFrKW2Data = { ...commonSlotParams, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW2Data = { ...commonSlotParams, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
+
+        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data);
+        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data);
+        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data);
+        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data);
+
+        expect(respSlot1.status).toBe(201); 
+        expect(respSlot2.status).toBe(201);
+        expect(respSlot3.status).toBe(201); 
+        expect(respSlot4.status).toBe(201);
+
+        const slotMoFrKW1 = respSlot1.body.data;
+        const slotSaSoKW1 = respSlot2.body.data;
+        const slotMoFrKW2 = respSlot3.body.data;
+        const slotSaSoKW2 = respSlot4.body.data;
+
+        // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
+        const ktMoFrKW1_Id = slotMoFrKW1.VerweisAufTopf;
+        const ktSaSoKW1_Id = slotSaSoKW1.VerweisAufTopf;
+        const ktMoFrKW2_Id = slotMoFrKW2.VerweisAufTopf;
+        const ktSaSoKW2_Id = slotSaSoKW2.VerweisAufTopf;
+
+        expect(ktMoFrKW1_Id).toBeDefined(); 
+        expect(ktSaSoKW1_Id).toBeDefined();
+        expect(ktMoFrKW2_Id).toBeDefined(); 
+        expect(ktSaSoKW2_Id).toBeDefined();
+        // Sicherstellen, dass es vier unterschiedliche Töpfe sind (aufgrund KW und Verkehrstag)
+        const topfIds = new Set([ktMoFrKW1_Id, ktSaSoKW1_Id, ktMoFrKW2_Id, ktSaSoKW2_Id]);
+        expect(topfIds.size).toBe(4);
+
+
+        // ----- 2. Anfrage erstellen -----
+        const anfrageData = {
+            EVU: "DB Fernverkehr AG",
+            ListeGewuenschterSlotAbschnitte: [{
+                von: "StadtA", bis: "StadtB",
+                Abfahrtszeit: { stunde: 8, minute: 0 }, Ankunftszeit: { stunde: 9, minute: 0 }
+            }],
+            Verkehrsart: "SPFV",
+            Verkehrstag: "täglich",
+            Zeitraum: {
+                start: GLOBAL_KW1_START_DATE_ISO, // Mo, 30.12.2024 (Start KW1)
+                ende: "2025-01-12T23:59:59.999Z" // So, 12.01.2025 (Ende KW2)
+            },
+            Email: "test@example.com",
+            Status: "validiert", // Wir erstellen sie direkt als 'validiert' für diesen Test
+            //ZugewieseneSlots: [slotMoFrKW1._id, slotSaSoKW1._id, slotMoFrKW2._id, slotSaSoKW2._id], //hier muss noch alle Slot-IDs in das Feld ZugewieseneSlots hinterlegt werden
+            //Entgelt: 2100
+        };
+        // Man wird eine Anfrage mit POST /api/anfragen erstellt
+        // und dann den Status auf 'validiert' setzen, falls die Erstellung nicht direkt 'validiert' erlaubt.
+        // Hier nehmen wir an, sie kann als 'validiert' erstellt werden oder wir setzen den Status manuell in der DB.
+        const anfrageErstelltResponse = await request(app).post('/api/anfragen').send({...anfrageData, Zugnummer: "100"});
+        expect(anfrageErstelltResponse.status).toBe(201); // Annahme: POST /api/anfragen gibt 201 bei Erfolg
+        let anfrageErstellt = anfrageErstelltResponse.body.data;
+        anfrageErstellt = await Anfrage.findById(anfrageErstellt._id);
+        //console.log(anfrageErstellt);
+        anfrageErstellt.Status = 'validiert';
+        await anfrageErstellt.save();
+        expect(anfrageErstellt.Status).toBe("validiert");
+
+        const anfrageErstelltResponse2 = await request(app).post('/api/anfragen').send({...anfrageData, Zugnummer: "200"});
+        expect(anfrageErstelltResponse2.status).toBe(201); // Annahme: POST /api/anfragen gibt 201 bei Erfolg
+        let anfrageErstellt2 = anfrageErstelltResponse2.body.data;
+        anfrageErstellt2 = await Anfrage.findById(anfrageErstellt2._id);
+        //console.log(anfrageErstellt2);
+        anfrageErstellt2.Status = 'validiert';
+        await anfrageErstellt2.save();
+        expect(anfrageErstellt2.Status).toBe("validiert");
+
+        const anfrageErstelltResponse3 = await request(app).post('/api/anfragen').send({...anfrageData, Zugnummer: "300"});
+        expect(anfrageErstelltResponse3.status).toBe(201); // Annahme: POST /api/anfragen gibt 201 bei Erfolg
+        let anfrageErstellt3 = anfrageErstelltResponse3.body.data;
+        anfrageErstellt3 = await Anfrage.findById(anfrageErstellt3._id);
+        //console.log(anfrageErstellt3);
+        anfrageErstellt3.Status = 'validiert';
+        await anfrageErstellt3.save();
+        expect(anfrageErstellt3.Status).toBe("validiert");
+
+
+        // ----- 3. Aktion: Zuordnungsprozess anstoßen -----
+        const zuordnenResponse = await request(app)
+            .post(`/api/anfragen/zuordnen/alle-validierten`)
+            .send();
+
+        //console.log(zuordnenResponse);
+        expect(zuordnenResponse.status).toBe(200);
+        const summary = zuordnenResponse.body.summary;
+        expect(summary.total).toBe(3);
+        expect(summary.success).toBe(3);
+        expect(summary.failed).toBe(0);
+
+        anfrageErstellt = await Anfrage.findById(anfrageErstellt._id);
+        anfrageErstellt2 = await Anfrage.findById(anfrageErstellt2._id);
+        anfrageErstellt3 = await Anfrage.findById(anfrageErstellt3._id);
+
+        // ----- 4. Überprüfung -----
+        // 4.1 Zugewiesene Slots in der Anfrage
+        expect(anfrageErstellt.ZugewieseneSlots).toHaveLength(4);
+        const zugewieseneSlotIdsInAnfrage = anfrageErstellt.ZugewieseneSlots.map(obj => obj.slot.toString());
+        expect(zugewieseneSlotIdsInAnfrage).toContain(slotMoFrKW1._id.toString());
+        expect(zugewieseneSlotIdsInAnfrage).toContain(slotSaSoKW1._id.toString());
+        expect(zugewieseneSlotIdsInAnfrage).toContain(slotMoFrKW2._id.toString());
+        expect(zugewieseneSlotIdsInAnfrage).toContain(slotSaSoKW2._id.toString());
+        const zugewieseneSlotStatusInAnfrage = anfrageErstellt.ZugewieseneSlots.map(obj => obj.statusEinzelzuweisung);
+        expect(new Set(zugewieseneSlotStatusInAnfrage).size).toBe(1);
+        expect(zugewieseneSlotStatusInAnfrage[0]).toBe('initial_in_konfliktpruefung_topf');
+        //expect([1,1,1,1].every( (val, i, zugewieseneSlotStatusInAnfrage) => val === zugewieseneSlotStatusInAnfrage[0] )).toBe(true);
+
+        // 4.2 Kapazitätstopf-Listen
+        const ktMoFrKW1_final = await Kapazitaetstopf.findById(ktMoFrKW1_Id);
+        const ktSaSoKW1_final = await Kapazitaetstopf.findById(ktSaSoKW1_Id);
+        const ktMoFrKW2_final = await Kapazitaetstopf.findById(ktMoFrKW2_Id);
+        const ktSaSoKW2_final = await Kapazitaetstopf.findById(ktSaSoKW2_Id);
+
+        expect(ktMoFrKW1_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(ktSaSoKW1_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(ktMoFrKW2_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(ktSaSoKW2_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(ktMoFrKW1_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(ktSaSoKW1_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(ktMoFrKW2_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(ktSaSoKW2_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(ktMoFrKW1_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+        expect(ktSaSoKW1_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+        expect(ktMoFrKW2_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+        expect(ktSaSoKW2_final.ListeDerAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+
+        // 4.3 Slots zugewiesene Anfragen
+        const slot1_final = await Slot.findById(slotMoFrKW1._id);
+        const slot2_final = await Slot.findById(slotSaSoKW1._id);
+        const slot3_final = await Slot.findById(slotMoFrKW2._id);
+        const slot4_final = await Slot.findById(slotSaSoKW2._id);
+
+        expect(slot1_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(slot2_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(slot3_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(slot4_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt._id.toString());
+        expect(slot1_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(slot2_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(slot3_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(slot4_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt2._id.toString());
+        expect(slot1_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+        expect(slot2_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+        expect(slot3_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+        expect(slot4_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrageErstellt3._id.toString());
+
+        // WICHTIG: Teste auch das berechnete Entgelt
+        // Annahme: Alle 4 genutzten Slot-Muster haben Grundentgelt 150.
+        // Die Anfrage läuft über 2 volle KWs "täglich", also 14 Tage.
+        // Jeder Abschnitt der Anfrage wird an diesen 14 Tagen befahren.
+        // Pro Tag kostet ein Abschnitt 150€. Summe pro Durchlauf = 150€ (für den einen Abschnitt).
+        // Gesamtentgelt = 14 Tage * 150€/Tag = 2100€.
+        const erwartetesEntgelt = 14 * (150); // 14 Tage * (Grundentgelt SlotTyp)
+        expect(anfrageErstellt.Entgelt).toBe(erwartetesEntgelt);
+        expect(anfrageErstellt2.Entgelt).toBe(erwartetesEntgelt);
+        expect(anfrageErstellt3.Entgelt).toBe(erwartetesEntgelt);
+    });
 });
 
 describe('Entgeltberechnung im Zuordnungsprozess', () => {
