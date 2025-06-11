@@ -115,6 +115,88 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
     });
 
+    it('sollte aus einem Slot mit Verkehrstag täglich zwei Slots mit Mo-F und Sa+So erstellen und automatisch einen passenden Kapazitätstopf erzeugen, wenn keiner existiert', async () => {
+        const slotData = {
+            von: "Hamburg Altona",
+            bis: "Berlin Hbf",
+            Abschnitt: "Hamburg - Berlin", // Wichtig für Topf-Findung/Erstellung
+            Abfahrt: { stunde: 7, minute: 33 },
+            Ankunft: { stunde: 9, minute: 49 },
+            Verkehrstag: "täglich",       // Wichtig für Topf-Findung/Erstellung
+            zeitraumStart: '2025-01-13',  // Wichtig für Topf-Findung/Erstellung
+            zeitraumEnde: '2025-01-19',  // Wichtig für Topf-Findung/Erstellung
+            Verkehrsart: "SPFV",         // Wichtig für Topf-Findung/Erstellung
+            Kalenderwoche: 3,
+            Grundentgelt: 150
+        };
+
+        // Aktion: Slot erstellen
+        const response = await request(app)
+            .post('/api/slots/massen-erstellung')
+            .send(slotData);
+
+        //console.log(response.body.message);
+
+        // Überprüfung der Antwort
+        expect(response.status).toBe(201);
+        expect(response.body.message).toBe(`Massen-Erstellung abgeschlossen. 2 Slots erfolgreich erstellt. 0 Fehler aufgetreten.`);
+        expect(response.body.erstellteSlots).toBeDefined();
+        const erstellterSlotResponse = response.body.erstellteSlots;
+        expect(erstellterSlotResponse.length).toBe(2);
+        expect(erstellterSlotResponse[0].SlotID_Sprechend).toBeDefined();
+        expect(erstellterSlotResponse[0].VerweisAufTopf).toBeDefined();
+        expect(erstellterSlotResponse[0].VerweisAufTopf).not.toBeNull();
+        expect(erstellterSlotResponse[1].SlotID_Sprechend).toBeDefined();
+        expect(erstellterSlotResponse[1].VerweisAufTopf).toBeDefined();
+        expect(erstellterSlotResponse[1].VerweisAufTopf).not.toBeNull();
+
+        // Überprüfung direkt in der Datenbank
+        const erstellterSlotDB1 = await Slot.findById(erstellterSlotResponse[0]._id).populate('VerweisAufTopf');
+        expect(erstellterSlotDB1).not.toBeNull();
+        expect(erstellterSlotDB1.VerweisAufTopf).not.toBeNull();
+
+        const erstellterSlotDB2 = await Slot.findById(erstellterSlotResponse[1]._id).populate('VerweisAufTopf');
+        expect(erstellterSlotDB2).not.toBeNull();
+        expect(erstellterSlotDB2.VerweisAufTopf).not.toBeNull();
+
+        const autoErstellterTopf1 = erstellterSlotDB1.VerweisAufTopf; // Dies ist bereits das populierte Objekt
+        const autoErstellterTopf2 = erstellterSlotDB2.VerweisAufTopf;
+        expect(autoErstellterTopf1).toBeInstanceOf(Kapazitaetstopf); // Prüfen, ob es ein Kapazitaetstopf-Dokument ist
+
+        // Eigenschaften des auto-erstellten Topfes prüfen
+        expect(autoErstellterTopf1.Abschnitt).toBe(slotData.Abschnitt);
+        expect(autoErstellterTopf1.Kalenderwoche).toBe(slotData.Kalenderwoche);
+        expect(autoErstellterTopf1.Verkehrstag).toBe('Mo-Fr');
+        expect(autoErstellterTopf1.Verkehrsart).toBe(slotData.Verkehrsart); // Da ein neuer Topf die VA des Slots übernimmt
+
+        expect(autoErstellterTopf2.Abschnitt).toBe(slotData.Abschnitt);
+        expect(autoErstellterTopf2.Kalenderwoche).toBe(slotData.Kalenderwoche);
+        expect(autoErstellterTopf2.Verkehrstag).toBe('Sa+So');
+        expect(autoErstellterTopf2.Verkehrsart).toBe(slotData.Verkehrsart);
+
+        const erwartetesZeitfenster = mapAbfahrtstundeToKapazitaetstopfZeitfenster(slotData.Abfahrt.stunde);
+        expect(autoErstellterTopf1.Zeitfenster).toBe(erwartetesZeitfenster);
+        expect(autoErstellterTopf2.Zeitfenster).toBe(erwartetesZeitfenster);
+        const erwarteteTopfIdTeile = [
+            "KT",
+            slotData.Abschnitt.toUpperCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, ''),
+            `KW${slotData.Kalenderwoche}`,
+            slotData.Verkehrsart,
+            'Mo-Fr',
+            `ZF${erwartetesZeitfenster.replace('-', '')}`
+        ];
+        expect(autoErstellterTopf1.TopfID).toBe(erwarteteTopfIdTeile.join('-'));
+
+        expect(autoErstellterTopf1.TopfID).toBeDefined(); // Sollte durch Hook generiert worden sein
+        expect(autoErstellterTopf1.ZeitfensterStartStunde).toBeDefined(); // Sollte durch Hook generiert worden sein
+
+        expect(autoErstellterTopf1.ListeDerSlots).toHaveLength(1);
+        expect(autoErstellterTopf1.ListeDerSlots[0].toString()).toBe(erstellterSlotDB1._id.toString());
+        expect(autoErstellterTopf1.maxKapazitaet).toBe(Math.floor(0.7 * 1)); // = 0     
+
+
+    });
+
     it('sollte einen Slot erstellen und einem existierenden Kapazitätstopf (spezifische Verkehrsart) zuordnen', async () => {
         // 1. Vorbereitung: Existierenden Kapazitätstopf erstellen
         const existierenderTopfData = {

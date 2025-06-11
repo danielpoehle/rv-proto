@@ -433,46 +433,57 @@ exports.createSlotsBulk = async (req, res) => {
         if (startKW === null || endKW === null) {
             return res.status(400).json({ message: 'Der angegebene Zeitraum liegt außerhalb des globalen Kalenders.' });
         }
+
+        // Bestimme, welche Verkehrstag-Typen erstellt werden müssen
+        let verkehrstageToCreate = [];
+        if (Verkehrstag === 'täglich') {
+            verkehrstageToCreate = ['Mo-Fr', 'Sa+So'];
+        } else {
+            // Akzeptiert 'Mo-Fr' oder 'Sa+So' direkt
+            verkehrstageToCreate = [Verkehrstag];
+        }
         
         const erstellteSlots = [];
         const fehler = [];
 
         // 3. Schleife durch alle KWs und Erstellung der Slots
         for (let kw = startKW; kw <= endKW; kw++) {
-            const slotData = {
-                von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
-                Grundentgelt, Verkehrsart,
-                Kalenderwoche: kw,
-                Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
-            };
+            for (const vt of verkehrstageToCreate) {
+                const slotData = {
+                    von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag: vt,
+                    Grundentgelt, Verkehrsart,
+                    Kalenderwoche: kw,
+                    Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
+                };
 
-            // Wir nutzen die Logik aus unserem `createSlot`-Controller wieder,
-            // indem wir sie in eine Service-Funktion auslagern oder hier nachbilden.
-            // Der Einfachheit halber bilden wir sie hier nach.
-            
-            try {
-                const potenziellerTopf = await findOrCreateKapazitaetstopf({ Abschnitt, Kalenderwoche: kw, Verkehrstag, Verkehrsart, Abfahrt });
+                // Wir nutzen die Logik aus unserem `createSlot`-Controller wieder,
+                // indem wir sie in eine Service-Funktion auslagern oder hier nachbilden.
+                // Der Einfachheit halber bilden wir sie hier nach.
+                
+                try {
+                    const potenziellerTopf = await findOrCreateKapazitaetstopf({ Abschnitt, Kalenderwoche: kw, Verkehrstag: vt, Verkehrsart, Abfahrt });
 
-                const neuerSlot = new Slot({ von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
-                                             Kalenderwoche: kw, Verkehrsart, Grundentgelt,
-                                             VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null,
-                                             Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
-                });
+                    const neuerSlot = new Slot({ von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag: vt,
+                                                Kalenderwoche: kw, Verkehrsart, Grundentgelt,
+                                                VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null,
+                                                Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
+                    });
 
-                const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
+                    const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
 
-                // Bidirektionale Verknüpfung: Slot zum (gefundenen oder neu erstellten) Kapazitätstopf hinzufügen
-                if (gespeicherterSlot.VerweisAufTopf) {
-                    await updateTopfSlotsAndCapacity(gespeicherterSlot.VerweisAufTopf, gespeicherterSlot._id, 'add');
+                    // Bidirektionale Verknüpfung: Slot zum (gefundenen oder neu erstellten) Kapazitätstopf hinzufügen
+                    if (gespeicherterSlot.VerweisAufTopf) {
+                        await updateTopfSlotsAndCapacity(gespeicherterSlot.VerweisAufTopf, gespeicherterSlot._id, 'add');
+                    }
+
+                    erstellteSlots.push(gespeicherterSlot);
+
+                } catch (err) {
+                    console.error(`Fehler beim Erstellen von Slot für KW ${kw}:`, err);
+                    // Wenn ein Slot wegen einer unique-Verletzung (existiert schon) fehlschlägt,
+                    // loggen wir den Fehler und machen mit dem nächsten weiter.
+                    fehler.push(`KW ${kw}: ${err.message}`);
                 }
-
-                erstellteSlots.push(gespeicherterSlot);
-
-            } catch (err) {
-                console.error(`Fehler beim Erstellen von Slot für KW ${kw}:`, err);
-                // Wenn ein Slot wegen einer unique-Verletzung (existiert schon) fehlschlägt,
-                // loggen wir den Fehler und machen mit dem nächsten weiter.
-                fehler.push(`KW ${kw}: ${err.message}`);
             }
         }
 
