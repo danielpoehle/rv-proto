@@ -509,7 +509,7 @@ exports.getAllKonflikte = async (req, res) => {
     try {
         const queryParams = req.query;
         let filter = {};
-        let sortOptions = { createdAt: -1 }; // Neueste zuerst als Standard
+        let sortOptions = { status: 1, createdAt: -1 }; // Neueste zuerst als Standard
 
         if (queryParams.status) {
             filter.status = queryParams.status;
@@ -539,20 +539,53 @@ exports.getAllKonflikte = async (req, res) => {
         const limit = parseInt(queryParams.limit, 10) || 10;
         const skip = (page - 1) * limit;
 
+        // 1. Lade die Konfliktdokumente für die aktuelle Seite
         const konflikte = await KonfliktDokumentation.find(filter)
-            .populate('ausloesenderKapazitaetstopf', 'TopfID Abschnitt Verkehrsart Kalenderwoche Verkehrstag Zeitfenster')
-            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend Zugnummer EVU Status')
-            // Später auch andere Felder populieren, wenn sie gefüllt sind:
-            // .populate('zugewieseneAnfragen', 'AnfrageID_Sprechend Zugnummer')
+            .select('-__v') // Schließe das __v Feld aus
+            .populate('ausloesenderKapazitaetstopf', 'TopfID Verkehrsart maxKapazitaet')
             .sort(sortOptions)
             .skip(skip)
-            .limit(limit);
+            .limit(limit)
+            .lean(); // .lean() für reine JS-Objekte, die wir anreichern können
 
         const totalKonflikte = await KonfliktDokumentation.countDocuments(filter);
+        
+
+        // 2. Finde für die abgerufenen Konflikte die zugehörige Gruppenzuordnung
+        const konfliktIds = konflikte.map(k => k._id);
+        const gruppen = await KonfliktGruppe.find({ konflikteInGruppe: { $in: konfliktIds } }).select('_id konflikteInGruppe');
+        
+        // Erstelle eine Map für schnellen Zugriff: konfliktId -> gruppenId
+        const konfliktZuGruppeMap = new Map();
+        gruppen.forEach(g => {
+            g.konflikteInGruppe.forEach(kId => {
+                konfliktZuGruppeMap.set(kId.toString(), g._id.toString());
+            });
+        });
+
+        // 3. Reichere jedes Konflikt-Objekt mit den finalen Daten an
+        const angereicherteKonflikte = konflikte.map(konflikt => {
+            const summeAbgelehnt = 
+                (konflikt.ListeAnfragenMitVerzicht?.length || 0) +
+                (konflikt.ListeAnfragenVerschubKoordination?.length || 0) +
+                (konflikt.abgelehnteAnfragenEntgeltvergleich?.length || 0) +
+                (konflikt.abgelehnteAnfragenHoechstpreis?.length || 0);
+
+            return {
+                ...konflikt,
+                gruppenId: konfliktZuGruppeMap.get(konflikt._id.toString()) || null, // Füge die Gruppen-ID hinzu
+                statistik: {
+                    anzahlBeteiligter: konflikt.beteiligteAnfragen?.length || 0,
+                    anzahlZugewiesener: konflikt.zugewieseneAnfragen?.length || 0,
+                    anzahlAbgelehnter: summeAbgelehnt
+                }
+            };
+        });
+
 
         res.status(200).json({
             message: 'Konfliktdokumentationen erfolgreich abgerufen.',
-            data: konflikte,
+            data: angereicherteKonflikte,
             currentPage: page,
             totalPages: Math.ceil(totalKonflikte / limit),
             totalCount: totalKonflikte
