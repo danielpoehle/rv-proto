@@ -424,7 +424,9 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
     return {anfragenToSave};
 }
 
-// @desc    Identifiziert Überbuchungen in Kapazitätstöpfen und legt Konfliktdokumente an
+// @desc    Synchronisiert Konfliktstatus: Identifiziert Überbuchungen in Töpfen,
+//          erstellt/aktualisiert Konfliktdokumente UND aktualisiert den Status
+//          der betroffenen Slot-Zuweisungen in den Anfragen.
 // @route   POST /api/konflikte/identifiziere-topf-konflikte
 exports.identifiziereTopfKonflikte = async (req, res) => {
     try {
@@ -435,12 +437,16 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
         let neuErstellteKonfliktDokus = [];
         let aktualisierteUndGeoeffneteKonflikte = [];
         let unveraenderteBestehendeKonflikte = [];
+        let autoGeloesteKonflikte = []; // Um aufzulisten, welche Konflikte sich von selbst gelöst haben
         let toepfeOhneKonflikt = [];
 
         for (const topf of alleToepfe) {
-            if (topf.ListeDerAnfragen.length > topf.maxKapazitaet) {
+            const istUeberbucht = topf.ListeDerAnfragen.length > topf.maxKapazitaet;
+
+            if (istUeberbucht) {
                 console.log(`Konflikt in Topf ${topf.TopfID || topf._id}: ${topf.ListeDerAnfragen.length} Anfragen > maxKap ${topf.maxKapazitaet}`);
 
+                // 1. Konfliktdokument erstellen oder aktualisieren
                 let konfliktDoku = await KonfliktDokumentation.findOne({
                     ausloesenderKapazitaetstopf: topf._id
                 }).sort({ updatedAt: -1 });
@@ -480,8 +486,38 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     neuErstellteKonfliktDokus.push(neuesKonfliktDoku);
                     console.log(`Neues Konfliktdokument ${neuesKonfliktDoku._id} für Topf ${topf.TopfID} erstellt.`);
                 }
+
+                // 2. Status der Anfragen aktualisieren
+                // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
+                for (const anfrage of topf.ListeDerAnfragen) {
+                    await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'wartet_konflikt_topf', topf._id);
+                }
+
             } else {
                 toepfeOhneKonflikt.push(topf.TopfID || topf._id);
+
+                // 1. Status der Anfragen aktualisieren
+                // Alle Anfragen in diesem Topf sind für die Slots dieses Topfes "bestätigt" (auf Topf-Ebene)
+                for (const anfrage of topf.ListeDerAnfragen) {
+                    await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'bestaetigt_topf', topf._id);
+                }
+
+                // 2. Prüfen, ob für diesen Topf ein alter, offener Konflikt existiert und ihn automatisch lösen
+                const offenerKonflikt = await KonfliktDokumentation.findOne({
+                    ausloesenderKapazitaetstopf: topf._id,
+                    status: { $ne: 'geloest' } // Finde einen, der noch nicht als gelöst markiert ist
+                });
+
+                if (offenerKonflikt) {
+                    console.log(`Konflikt ${offenerKonflikt._id} für Topf ${topf.TopfID} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
+                    offenerKonflikt.status = 'geloest';
+                    offenerKonflikt.abschlussdatum = new Date();
+                    offenerKonflikt.notizen = `${offenerKonflikt.notizen || ''}\nKonflikt am ${new Date().toISOString()} automatisch gelöst, da Kapazität nicht mehr überschritten.`;
+                    // Die Anfragen, die noch im Topf sind, sind die "Gewinner"
+                    offenerKonflikt.zugewieseneAnfragen = topf.ListeDerAnfragen.map(a => a._id);
+                    await offenerKonflikt.save();
+                    autoGeloesteKonflikte.push(offenerKonflikt);
+                }
             }
         }
 
@@ -494,6 +530,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
             neuErstellteKonflikte: neuErstellteKonfliktDokus.map(d => ({ id: d._id, topf: d.ausloesenderKapazitaetstopf, status: d.status })),
             aktualisierteUndGeoeffneteKonflikte: aktualisierteUndGeoeffneteKonflikte.map(d => ({ id: d._id, topf: d.ausloesenderKapazitaetstopf, status: d.status })),
             unveraenderteBestehendeKonflikte: unveraenderteBestehendeKonflikte.map(d => ({ id: d._id, topf: d.ausloesenderKapazitaetstopf, status: d.status })),
+            autoGeloesteKonflikte: autoGeloesteKonflikte.map(d => ({ id: d._id, topf: d.ausloesenderKapazitaetstopf, status: d.status })),
             toepfeOhneKonflikt: toepfeOhneKonflikt
         });
 
@@ -693,7 +730,7 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
 
         // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
         for (const anfrageDoc of anfragenToSave.values()) {
-            console.log(`anfragenToSave ${anfragenToSave}, anfrageDoc ${anfrageDoc}`);
+            //console.log(`anfragenToSave ${anfragenToSave}, anfrageDoc ${anfrageDoc}`);
             await anfrageDoc.updateGesamtStatus();
             await anfrageDoc.save();
         }

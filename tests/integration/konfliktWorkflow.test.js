@@ -12,7 +12,7 @@ const KonfliktGruppe = require('../../models/KonfliktGruppe');
 // function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) { /* ... */ }
 
 describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
-        let kt_DetectConflict;
+        let kt_DetectConflict, kt_NoConflict, kt_NoConflict2;
         let anfragenIds = [];
 
         // Wenn du manuelle Bereinigung pro Testfall brauchst:
@@ -41,10 +41,18 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
 
             // Vorbereitung: Kapazitätstopf mit maxKapazitaet = 2 erstellen
             const topfKriterien = {
-                Abschnitt: "KonfliktZone", Kalenderwoche: 2, Verkehrstag: "Sa+So",
+                Abschnitt: "KonfliktZone1", Kalenderwoche: 2, Verkehrstag: "Sa+So",
                 Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
             };
-            // 3 Slots erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
+            const topfKriterien2 = {
+                Abschnitt: "KonfliktZone2", Kalenderwoche: 2, Verkehrstag: "Sa+So",
+                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 15 // Ergibt ZF "13-15"
+            };
+            const topfKriterien3 = {
+                Abschnitt: "KonfliktZone3", Kalenderwoche: 2, Verkehrstag: "Sa+So",
+                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
+            };
+            // 3 Slots für KonfliktZone1 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
             const slotBasis = { von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
                                 Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, 
                                 Verkehrsart: topfKriterien.Verkehrsart,
@@ -54,24 +62,100 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
             await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
             
+            // 2 Slots für KonfliktZone2 erstellen, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
+            const slotBasis2 = { von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
+                                Verkehrstag: topfKriterien2.Verkehrstag, Kalenderwoche: topfKriterien2.Kalenderwoche, 
+                                Verkehrsart: topfKriterien2.Verkehrsart,
+                                Grundentgelt: 250 
+                            };
+            const s2 = await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 10 } });
+            await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+
+            // 3 Slots für KonfliktZone3 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
+            const slotBasis3 = { von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+                                Verkehrstag: topfKriterien3.Verkehrstag, Kalenderwoche: topfKriterien3.Kalenderwoche, 
+                                Verkehrsart: topfKriterien3.Verkehrsart,
+                                Grundentgelt: 50 
+                            };
+            const s3 = await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 10 } });
+            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 30 } });
+            
+            
             kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
             expect(kt_DetectConflict.maxKapazitaet).toBe(2);
 
-            // 4 Anfragen erstellen
-            const anfrageBasis = { EVU: "ConflictEVU", Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }}; // KW2 2025
-            const anfrageBasis2 = { EVU: "ConflictEVU2", Email: "conflict@evu2.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }}; // KW2 2025
+            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
+            expect(kt_NoConflict.maxKapazitaet).toBe(1);
+
+            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
+            expect(kt_NoConflict2.maxKapazitaet).toBe(2);
+
+            // 4 Anfragen erstellen für KonfliktZone1 und KonfliktZone2
+            const anfrageBasis = { EVU: "ConflictEVU", Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
+            const anfrageBasis2 = { EVU: "ConflictEVU2", Email: "conflict@evu2.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
             const anfragePromises = [];
             for (let i = 1; i <= 3; i++) {
                 anfragePromises.push(new Anfrage({ ...anfrageBasis, Zugnummer: `C${i}`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 + (i-1)*10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
             }
-            anfragePromises.push(new Anfrage({ ...anfrageBasis2, Zugnummer: `C4`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+            anfragePromises.push(new Anfrage({ ...anfrageBasis2, Zugnummer: `C4`, 
+                                               ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}},
+                                                                                 {von: "Z", bis:"AA", Abfahrtszeit: {stunde:15, minute:10 }, Ankunftszeit:{stunde:16,minute:0}}
+                                               ] }).save());
             const erstellteAnfragen = await Promise.all(anfragePromises);
-            anfragenIds = erstellteAnfragen.map(a => a._id);
+            anfragenIds = erstellteAnfragen.map(a => a._id);  
+            
+            // 1 Anfrage erstellen für KonfliktZone3
+            let anfrage_A = await new Anfrage({ ...anfrageBasis2, Zugnummer: "C5", 
+                                            ListeGewuenschterSlotAbschnitte: [{von: "V", bis:"W", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}]
+                                        }).save();
+
+            // 3. Zuordnungsprozess für die Anfragen anstoßen -> Erzeugt die Konfliktsituation
+            await request(app).post(`/api/anfragen/${anfragenIds[0]._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfragenIds[1]._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfragenIds[2]._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfragenIds[3]._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_A._id}/zuordnen`).send();
+            
+            //console.log(anfrage4);
+
+            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(4); // Überbuchung (4 > maxKap 2)
+
+            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
+            expect(kt_NoConflict.ListeDerAnfragen).toHaveLength(1); // kein Konflikt (1 <= max Kap 1)
+
+            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
+            expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1); // kein Konflikt (1 <= max Kap 2)
 
             // Anfragen dem Kapazitätstopf zuordnen (manuell für diesen Test)
-            kt_DetectConflict.ListeDerAnfragen = anfragenIds;
-            await kt_DetectConflict.save();
-            expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(4); // Überbuchung (4 > maxKap 2)
+            //kt_DetectConflict.ListeDerAnfragen = anfragenIds;
+            //await kt_DetectConflict.save();
+            
+        });
+
+        it('sollte einen neuen Konflikt korrekt identifizieren und den Status zugewiesenen Slots ohne Konflikt korrekt setzen', async () => {
+            // Aktion: Konflikterkennung anstoßen
+            const response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+
+            // Überprüfung der Antwort
+            expect(response.status).toBe(200);
+            expect(response.body.message).toBe('Konfliktdetektion für Kapazitätstöpfe abgeschlossen.');
+            expect(response.body.neuErstellteKonflikte).toHaveLength(1);
+            expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
+            expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
+            expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+
+            // Anfrage C5 hat überhaupt keinen Konflikt, ist allein im Topf kt_NoConflict2 (1 <= max Kap 2)
+            let anfrage5 = await Anfrage.findOne({Zugnummer: `C5`});
+            expect(anfrage5.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage5.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+
+            kt_NoConflict2 = await Kapazitaetstopf.findById(kt_NoConflict2._id);
+            expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1);
+            expect(kt_NoConflict2.ListeDerAnfragen[0]._id.toString()).toBe(anfrage5._id.toString());
         });
 
         it('sollte einen neuen Konflikt korrekt identifizieren und ein Konfliktdokument erstellen', async () => {
@@ -86,6 +170,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             expect(response.body.neuErstellteKonflikte).toHaveLength(1);
             expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
             expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
+            expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
 
             const konfliktDokuId = response.body.neuErstellteKonflikte[0].id;
 
@@ -100,6 +185,26 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             const erwarteteAnfragenStrings = anfragenIds.map(id => id.toString());
             expect(beteiligteAnfragenStringsDB.sort()).toEqual(erwarteteAnfragenStrings.sort());
             expect(beteiligteAnfragenStringsDB).toHaveLength(4);
+
+            //Prüfe Status der Anfragen im Konflikt
+            let beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[0]);
+            let anfrage4 = await Anfrage.findOne({Zugnummer: `C4`});
+            //console.log(anfrage4);
+            expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[1]);
+            expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[2]);
+            expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[3]);
+            expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage4.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage4.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage4.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            
 
             expect(konfliktDokuDB.zugewieseneAnfragen).toEqual([]);
             expect(konfliktDokuDB.abgelehnteAnfragenEntgeltvergleich).toEqual([]);
