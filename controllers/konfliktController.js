@@ -71,7 +71,7 @@ async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, au
         await anfrageDoc.updateGesamtStatus(); // Methode aus Anfrage-Modell aufrufen
         await anfrageDoc.save();
         //console.log(`Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} nachher ${anfrageDoc.Status}`);
-        console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
+        console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} auf ${anfrageDoc.Status} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
     }
     return anfrageDoc;
 };
@@ -178,7 +178,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
             !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
         );
         
-        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.\n ${aktiveAnfragenFuerEntgeltvergleich}`);
+        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
 
         // ReihungEntgelt automatisch erstellen und sortieren
         konflikt.ReihungEntgelt = aktiveAnfragenFuerEntgeltvergleich
@@ -190,7 +190,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
 
         konflikt.ReihungEntgelt.forEach((item, index) => item.rang = index + 1);
         konflikt.markModified('ReihungEntgelt');
-        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.\n${konflikt.ReihungEntgelt}`);
+        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
 
         // Felder für Zuweisung/Ablehnung zurücksetzen, bevor sie neu befüllt werden
         konflikt.zugewieseneAnfragen = [];
@@ -358,7 +358,7 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
     let verbleibenImWartestatusHP = [];
 
     console.log(`HP-Runde: maxKap=${maxKap}, bereitsZugewiesen=${bereitsSicherZugewieseneAnzahl}, verbleibend=${verbleibendeKapFuerHP}`);
-    console.log("Valide Gebote sortiert:", valideGebote);
+    //console.log("Valide Gebote sortiert:", valideGebote);
 
 
     // 3. Valide Gebote verarbeiten
@@ -669,12 +669,12 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
             return res.status(400).json({ message: `Konflikt ist im Status '${konflikt.status}' und kann nicht über diesen Endpunkt bearbeitet werden.` });
         }
 
-        // Rufe die zentrale Service-Funktion auf
+        // Rufe die zentrale Service-Funktion auf        
         const { anfragenToSave } = await resolveVerzichtVerschubForSingleConflict(
             konflikt,
             ListeAnfragenMitVerzicht,
             ListeAnfragenVerschubKoordination
-        );
+        );       
         
         // Allgemeine Notizen aus dem Request Body verarbeiten
         if (notizen !== undefined) {
@@ -689,8 +689,11 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
 
         const aktualisierterKonflikt = await konflikt.save(); // Speichere das Konfliktdokument
 
+        
+
         // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
         for (const anfrageDoc of anfragenToSave.values()) {
+            console.log(`anfragenToSave ${anfragenToSave}, anfrageDoc ${anfrageDoc}`);
             await anfrageDoc.updateGesamtStatus();
             await anfrageDoc.save();
         }
@@ -942,7 +945,9 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
 
         // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
         for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+            console.log(`anfrageDoc vor Statusupdate ${anfrageDoc}`);
              await anfrageDoc.updateGesamtStatus();
+             console.log(`anfrageDoc nach Statusupdate ${anfrageDoc}`);
              await anfrageDoc.save();
         }
 

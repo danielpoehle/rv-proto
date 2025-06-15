@@ -107,7 +107,16 @@ describe('Gruppierte Konfliktlösung', () => {
         await request(app).put(`/api/anfragen/${anfrage_A._id}`).send({Entgelt: 1000, Status: 'validiert'}); 
         await request(app).put(`/api/anfragen/${anfrage_B._id}`).send({Entgelt:  900, Status: 'validiert'}); 
         await request(app).put(`/api/anfragen/${anfrage_C._id}`).send({Entgelt:  800, Status: 'validiert'}); 
-        await request(app).put(`/api/anfragen/${anfrage_D._id}`).send({Entgelt:  700, Status: 'validiert'});         
+        await request(app).put(`/api/anfragen/${anfrage_D._id}`).send({Entgelt:  700, Status: 'validiert'});  
+        
+        anfrage_A = await Anfrage.findById(anfrage_A._id);
+        anfrage_A.Status = 'validiert'; anfrage_A.save();
+        anfrage_B = await Anfrage.findById(anfrage_B._id);
+        anfrage_B.Status = 'validiert'; anfrage_B.save();
+        anfrage_C = await Anfrage.findById(anfrage_C._id);
+        anfrage_C.Status = 'validiert'; anfrage_C.save();
+        anfrage_D = await Anfrage.findById(anfrage_D._id);
+        anfrage_D.Status = 'validiert'; anfrage_D.save();
 
         // 4. Konflikterkennung anstoßen -> Erzeugt die KonfliktDokumentationen und die KonfliktGruppe
         const identResp = await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
@@ -183,6 +192,7 @@ describe('Gruppierte Konfliktlösung', () => {
 
         // Überprüfung des Status von Anfrage B
         const anfrage_B_final = await Anfrage.findById(anfrage_B._id);
+        console.log(anfrage_B_final);
         // Da A_B für ALLE ihre 6 Topf-Konflikte einen Verzicht eingetragen hat,
         // sollte ihr Gesamtstatus jetzt "final_abgelehnt" sein.
         expect(anfrage_B_final.Status).toBe('final_abgelehnt'); 
@@ -311,7 +321,7 @@ describe('Gruppierte Konfliktlösung', () => {
             .send({});
         
         einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
-        console.log(einKonflikt_zwischen);
+        //console.log(einKonflikt_zwischen);
         let anfrage_B_zwischen = await Anfrage.findById(anfrage_B._id);
         //console.log(anfrage_B_zwischen);
 
@@ -424,9 +434,9 @@ describe('Gruppierte Konfliktlösung', () => {
             .send(hoechstpreisPayload);
 
         einKonflikt_zwischen = await KonfliktDokumentation.findById(erstellteKonfliktDokus[6]._id);
-        console.log(einKonflikt_zwischen);
+        //console.log(einKonflikt_zwischen);
         let anfrage_B_zwischen = await Anfrage.findById(anfrage_B._id);
-        console.log(anfrage_B_zwischen);
+        //console.log(anfrage_B_zwischen);
 
         const gruppe_final = await KonfliktGruppe.findById(gruppenId);
         expect(gruppe_final.status).toBe('vollstaendig_geloest');

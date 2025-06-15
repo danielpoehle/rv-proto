@@ -311,7 +311,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             const a1_updated = await Anfrage.findById(anfrage1._id).populate('ZugewieseneSlots.slot');
             const a2_updated = await Anfrage.findById(anfrage2._id).populate('ZugewieseneSlots.slot');
             const a3_updated = await Anfrage.findById(anfrage3._id).populate('ZugewieseneSlots.slot');
-            //console.log(a1_updated);
+            // console.log(a1_updated);
 
             // Für A1 und A2: statusEinzelzuweisung der relevanten Slots sollte 'bestaetigt_topf' sein
             a1_updated.ZugewieseneSlots.forEach(zs => {

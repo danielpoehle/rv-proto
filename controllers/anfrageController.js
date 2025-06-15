@@ -452,7 +452,7 @@ exports.zuordneAlleValidiertenAnfragen = async (req, res) => {
         }
 
         // Nach Abschluss aller Zuweisungen, die Konfliktgruppen synchronisieren
-        await konfliktService.aktualisiereKonfliktGruppen();
+        //await konfliktService.aktualisiereKonfliktGruppen();
 
         res.status(200).json({
             message: 'Massen-Zuweisung abgeschlossen.',
@@ -494,17 +494,38 @@ exports.getAnfrageSummary = async (req, res) => {
                     evu: "$_id.evu",
                     totalAnfragen: 1,
                     statusCounts: { // Erzeuge ein Objekt mit den Zählerständen pro Status
+                        eingegangen: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "eingegangen"] } } }
+                        },
                         validiert: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "validiert"] } } }
                         },
-                        inKonflikt: { // Fasst alle "in Arbeit"-Status zusammen
-                            $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['in_konfliktloesung_topf', 'in_konfliktloesung_slot', 'teilweise_bestaetigt_topf']] } } }
+                        ungueltig: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", ["ungueltig", 'zuordnung_fehlgeschlagen']] } } }
                         },
+                        inPruefungTopf: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "in_konfliktpruefung"] } } }
+                        },
+                        inKonflikt: { // Fasst alle "in Arbeit"-Status zusammen
+                            $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['in_konfliktloesung_topf', 'in_konfliktloesung_slot']] } } }
+                        },
+                        inPruefungSlot: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", ['vollstaendig_bestaetigt_topf', 'teilweise_bestaetigt_topf']] } } }
+                        },                        
                         bestaetigt: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "vollstaendig_final_bestaetigt"] } } }
                         },
+                        teilzuweisung: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "teilweise_final_bestaetigt"] } } }
+                        },
                         abgelehnt: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "final_abgelehnt"] } } }
+                        },
+                        storniert: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "storniert_nutzer"] } } }
+                        },
+                        keinePlausi: {
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "fehlende_Plausi"] } } }
                         },
                         // Man könnte hier noch weitere Status-Gruppen hinzufügen
                     }
