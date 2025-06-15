@@ -22,6 +22,7 @@ const konfliktDokumentationSchema = new Schema({
     }],
     erstellungsdatum: { type: Date, default: Date.now },
     abschlussdatum: { type: Date },
+    konfliktTyp: String,
     status: {
     type: String,
     required: true,

@@ -501,7 +501,7 @@ exports.getAnfrageSummary = async (req, res) => {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "validiert"] } } }
                         },
                         ungueltig: {
-                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", ["ungueltig", 'zuordnung_fehlgeschlagen']] } } }
+                            $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ["ungueltig", 'zuordnung_fehlgeschlagen']] } } }
                         },
                         inPruefungTopf: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "in_konfliktpruefung"] } } }
@@ -510,7 +510,7 @@ exports.getAnfrageSummary = async (req, res) => {
                             $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['in_konfliktloesung_topf', 'in_konfliktloesung_slot']] } } }
                         },
                         inPruefungSlot: {
-                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", ['vollstaendig_bestaetigt_topf', 'teilweise_bestaetigt_topf']] } } }
+                            $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['vollstaendig_bestaetigt_topf', 'teilweise_bestaetigt_topf']] } } }
                         },                        
                         bestaetigt: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "vollstaendig_final_bestaetigt"] } } }
@@ -539,6 +539,8 @@ exports.getAnfrageSummary = async (req, res) => {
                 }
             }
         ]);
+
+        //console.log(summary);
 
         res.status(200).json({
             message: 'Zusammenfassung der Anfragen erfolgreich abgerufen.',

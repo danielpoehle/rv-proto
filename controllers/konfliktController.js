@@ -458,6 +458,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     if (!sindObjectIdArraysGleich(aktuelleAnfragenAmTopfIds, gespeicherteAnfragenImKonfliktIds)) {
                         console.log(`Konfliktdokument ${konfliktDoku._id} für Topf ${topf.TopfID}: Beteiligte Anfragen haben sich geändert. Wird zurückgesetzt.`);
                         konfliktDoku.beteiligteAnfragen = aktuelleAnfragenAmTopfIds;
+                        konfliktDoku.konfliktTyp = 'KAPAZITAETSTOPF';
                         konfliktDoku.status = 'offen';
                         konfliktDoku.zugewieseneAnfragen = [];
                         konfliktDoku.abgelehnteAnfragenEntgeltvergleich = [];
@@ -479,6 +480,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     const neuesKonfliktDoku = new KonfliktDokumentation({
                         beteiligteAnfragen: aktuelleAnfragenAmTopfIds,
                         ausloesenderKapazitaetstopf: topf._id,
+                        konfliktTyp: 'KAPAZITAETSTOPF',
                         status: 'offen',
                         notizen: `Automatisch erstellter Konflikt für Kapazitätstopf ${topf.TopfID || topf._id} am ${new Date().toISOString()}. ${topf.ListeDerAnfragen.length} Anfragen bei max. Kapazität von ${topf.maxKapazitaet}.`
                     });
@@ -645,25 +647,31 @@ exports.getKonfliktById = async (req, res) => {
         }
 
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
-            .populate('ausloesenderKapazitaetstopf', 'TopfID Abschnitt Verkehrsart Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet ListeDerSlots') // Mehr Details zum Topf
+            // Stufe 1: Populiere den auslösenden Kapazitätstopf
             .populate({
-                path: 'beteiligteAnfragen',
-                select: 'AnfrageID_Sprechend Zugnummer EVU Status Verkehrsart Verkehrstag Zeitraum',
-                populate: { path: 'ZugewieseneSlots', select: 'SlotID_Sprechend von bis' } // Beispiel für verschachteltes Populate
+                path: 'ausloesenderKapazitaetstopf',
+                // Stufe 2: Innerhalb des Topfes, populiere dessen Liste von Slots
+                populate: {
+                    path: 'ListeDerSlots',
+                    model: 'Slot',
+                    // Lade die Felder, die wir in der Slot-Tabelle anzeigen wollen
+                    select: 'SlotID_Sprechend Linienbezeichnung Abschnitt zugewieseneAnfragen'
+                }
             })
-            .populate('zugewieseneAnfragen', 'AnfrageID_Sprechend Zugnummer EVU')
-            .populate('abgelehnteAnfragenEntgeltvergleich', 'AnfrageID_Sprechend Zugnummer EVU')
-            .populate('abgelehnteAnfragenHoechstpreis', 'AnfrageID_Sprechend Zugnummer EVU')
-            .populate('ListeAnfragenMitVerzicht', 'AnfrageID_Sprechend Zugnummer EVU')
-            .populate({
-                 path: 'ListeAnfragenVerschubKoordination.anfrage', // Pfad zum ObjectId im Array von Objekten
-                 select: 'AnfrageID_Sprechend Zugnummer EVU'
-            });
+            .populate([
+                { path: 'beteiligteAnfragen', select: 'AnfrageID_Sprechend EVU Zugnummer Status Verkehrsart Entgelt' },
+                { path: 'zugewieseneAnfragen', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
+                { path: 'abgelehnteAnfragenEntgeltvergleich', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
+                { path: 'abgelehnteAnfragenHoechstpreis', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
+                { path: 'ListeAnfragenMitVerzicht', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
+                { path: 'ListeAnfragenVerschubKoordination.anfrage', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' }
+            ])
+            .lean();
 
 
         if (!konflikt) {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
-        }
+        } 
 
         res.status(200).json({
             message: 'Konfliktdokumentation erfolgreich abgerufen.',
