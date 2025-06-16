@@ -72,6 +72,12 @@ router.get('/gruppen/:gruppenId/verschiebe-analyse', konfliktController.getVersc
 // @access  Admin/System
 router.get('/gruppen/:gruppenId/alternativen', konfliktController.getAlternativSlotsFuerGruppe);
 
+// ROUTE zum Zurücksetzen einer Konfliktgruppe
+// @route   POST /api/konflikte/gruppen/:gruppenId/reset
+// @desc    Löscht eine Konfliktgruppe und deren Dokumente und setzt die betroffenen Anfragen zurück
+// @access  Admin/System
+router.post('/gruppen/:gruppenId/reset', konfliktController.resetKonfliktGruppe);
+
 
 
 module.exports = router;

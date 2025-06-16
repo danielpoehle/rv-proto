@@ -1489,3 +1489,77 @@ exports.getAlternativSlotsFuerGruppe = async (req, res) => {
         res.status(500).json({ message: 'Serverfehler bei der Analyse.' });
     }
 };
+
+// @desc    Setzt eine komplette Konfliktgruppe zurück und aktualisiert den Status der Slots der Anfragen
+// @route   POST /api/konflikte/gruppen/:gruppenId/reset
+exports.resetKonfliktGruppe = async (req, res) => {
+    const { gruppenId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) {
+        return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    }
+
+    try {
+        // 1. Finde die Gruppe und ihre zugehörigen Dokumente
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'konflikteInGruppe',
+                select: 'ausloesenderKapazitaetstopf'
+            });
+
+        if (!gruppe) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        }
+
+        const anfrageIdsToReset = gruppe.beteiligteAnfragen.map(id => id.toString());
+        const konfliktDokuIdsToDelete = gruppe.konflikteInGruppe.map(k => k._id);
+        const topfIdsInConflict = gruppe.konflikteInGruppe
+            .map(k => k.ausloesenderKapazitaetstopf?._id.toString())
+            .filter(id => id); // Filtere undefined/null heraus
+
+        // 2. Setze den Status der betroffenen Slot-Zuweisungen in allen Anfragen der Gruppe zurück
+        const anfragen = await Anfrage.find({ _id: { $in: anfrageIdsToReset } }).populate('ZugewieseneSlots.slot', 'VerweisAufTopf');
+
+        for (const anfrage of anfragen) {
+            let anfrageModifiziert = false;
+            for (const zuweisung of anfrage.ZugewieseneSlots) {
+                // Prüfe, ob der Slot zu einem der Konflikttöpfe dieser Gruppe gehört
+                if (zuweisung.slot && zuweisung.slot.VerweisAufTopf && topfIdsInConflict.includes(zuweisung.slot.VerweisAufTopf.toString())) {
+                    if (zuweisung.statusEinzelzuweisung !== 'initial_in_konfliktpruefung_topf') {
+                        zuweisung.statusEinzelzuweisung = 'initial_in_konfliktpruefung_topf';
+                        anfrageModifiziert = true;
+                    }
+                }
+            }
+            if (anfrageModifiziert) {
+                anfrage.markModified('ZugewieseneSlots');
+                await anfrage.updateGesamtStatus(); // Gesamtstatus neu berechnen
+                await anfrage.save();
+            }
+        }
+        console.log(`${anfragen.length} Anfragen wurden zurückgesetzt.`);
+
+        // 3. Lösche alle zugehörigen Konfliktdokumentationen
+        if (konfliktDokuIdsToDelete.length > 0) {
+            const { deletedCount } = await KonfliktDokumentation.deleteMany({ _id: { $in: konfliktDokuIdsToDelete } });
+            console.log(`${deletedCount} Konfliktdokumentationen wurden gelöscht.`);
+        }
+
+        // 4. Lösche die Konfliktgruppe selbst
+        await KonfliktGruppe.findByIdAndDelete(gruppenId);
+        console.log(`Konfliktgruppe ${gruppenId} wurde gelöscht.`);
+        
+        res.status(200).json({
+            message: `Konfliktgruppe erfolgreich zurückgesetzt.`,
+            summary: {
+                anfragenZurueckgesetzt: anfragen.length,
+                konfliktDokusGeloescht: konfliktDokuIdsToDelete.length,
+                gruppeGeloeschtId: gruppenId
+            }
+        });
+
+    } catch (error) {
+        console.error(`Fehler beim Zurücksetzen der Konfliktgruppe ${gruppenId}:`, error);
+        res.status(500).json({ message: 'Serverfehler beim Zurücksetzen der Gruppe.' });
+    }
+};

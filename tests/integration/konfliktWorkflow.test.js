@@ -448,6 +448,99 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
 
     });
 
+    it('sollte eine komplette Konfliktgruppe zurücksetzen, Konfliktdokus löschen und Anfragen-Status revertieren', async () => {
+        // ---- SETUP: Erzeuge einen Konflikt mit 3 Anfragen für maxKapazität=2 ----
+        const topfKriterien = { Abschnitt: "ResetZone", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
+        const slotBasis = { von: "R", bis: "S", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: 100 };
+        // Erstelle 3 Slots -> maxKap = 2
+        const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 10 } });
+        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 20 } });
+        const s3Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 30 } });
+        const kt_Reset = await Kapazitaetstopf.findById(s1Resp.body.data.VerweisAufTopf);
+        expect(kt_Reset.maxKapazitaet).toBe(2);
+
+        // Erstelle 3 Anfragen
+        const zugewieseneSlotsFuerAnfragen = (await Slot.find({ VerweisAufTopf: kt_Reset._id })).map(s => ({
+            slot: s._id,
+            statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'
+        }));
+        const anfrageBasis = { EVU: "ResetEVU", Email: "reset@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2024-12-30", ende: "2025-01-05" }, ListeGewuenschterSlotAbschnitte: [{von: "R", bis:"S", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
+        
+        let anfrage1 = await new Anfrage({ ...anfrageBasis, Zugnummer: "R1", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
+        let anfrage2 = await new Anfrage({ ...anfrageBasis, Zugnummer: "R2", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
+        let anfrage3 = await new Anfrage({ ...anfrageBasis, Zugnummer: "R3", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
+        
+        kt_Reset.ListeDerAnfragen = [anfrage1._id, anfrage2._id, anfrage3._id]; // 3 Anfragen -> Konflikt
+        await kt_Reset.save();
+
+        // Identifiziere Konflikt und Gruppe
+        await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
+        const konfliktGruppe = await KonfliktGruppe.findOne({ "beteiligteAnfragen": anfrage1._id });
+        expect(konfliktGruppe).not.toBeNull();
+        expect(konfliktGruppe.konflikteInGruppe).toHaveLength(1);
+        
+        // ---- SIMULIERE LÖSUNG: Löse den Konflikt, indem Anfrage 3 verzichtet ----
+        const updatePayload = {
+            konfliktDokumentIds: konfliktGruppe.konflikteInGruppe,
+            ListeAnfragenMitVerzicht: [anfrage3._id.toString()]
+        };
+        const loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${konfliktGruppe._id}/verzicht-verschub`)
+            .send(updatePayload);
+        expect(loesenResponse.status).toBe(200);
+        expect(loesenResponse.body.data.gruppe.status).toBe('vollstaendig_geloest');
+        anfrage1 = await Anfrage.findById(anfrage1._id);
+        anfrage2 = await Anfrage.findById(anfrage2._id);
+        anfrage3 = await Anfrage.findById(anfrage3._id);
+        expect(anfrage1.Status).toBe('vollstaendig_bestaetigt_topf');
+        expect(anfrage2.Status).toBe('vollstaendig_bestaetigt_topf');
+        expect(anfrage3.Status).toBe('final_abgelehnt');
+
+        // ---- AKTION: Rufe den Reset-Endpunkt für die Gruppe auf ----
+        const resetResponse = await request(app)
+            .post(`/api/konflikte/gruppen/${konfliktGruppe._id}/reset`)
+            .send();
+
+        // ---- ÜBERPRÜFUNG ----
+        // 1. Überprüfung der Reset-Antwort
+        expect(resetResponse.status).toBe(200);
+        expect(resetResponse.body.message).toBe('Konfliktgruppe erfolgreich zurückgesetzt.');
+        expect(resetResponse.body.summary.anfragenZurueckgesetzt).toBe(3);
+        expect(resetResponse.body.summary.konfliktDokusGeloescht).toBe(1);
+
+        // 2. Überprüfung der Datenbank: Konflikt-Objekte sollten gelöscht sein
+        const geloeschteGruppe = await KonfliktGruppe.findById(konfliktGruppe._id);
+        expect(geloeschteGruppe).toBeNull();
+        
+        const anzahlKonfliktDokus = await KonfliktDokumentation.countDocuments({ 
+            _id: { $in: konfliktGruppe.konflikteInGruppe } 
+        });
+        expect(anzahlKonfliktDokus).toBe(0);
+
+        // 3. Überprüfung der Anfragen: Status sollten zurückgesetzt sein
+        const anfrage1_final = await Anfrage.findById(anfrage1._id);
+        const anfrage2_final = await Anfrage.findById(anfrage2._id);
+        const anfrage3_final = await Anfrage.findById(anfrage3._id);
+
+        // Prüfe den Gesamtstatus, der durch updateGesamtStatus() neu berechnet wurde
+        expect(anfrage1_final.Status).toBe('in_konfliktpruefung');
+        expect(anfrage2_final.Status).toBe('in_konfliktpruefung');
+        expect(anfrage3_final.Status).toBe('in_konfliktpruefung');
+
+        // Prüfe den granularen Status der Slot-Zuweisung
+        // Anfrage 1 und 2 waren 'bestaetigt_topf', Anfrage 3 war 'abgelehnt_topf_verzichtet'
+        // -> Alle sollten jetzt wieder 'initial_in_konfliktpruefung_topf' sein.
+        for(const zuweisung of anfrage1_final.ZugewieseneSlots) {
+            expect(zuweisung.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+        }
+        for(const zuweisung of anfrage2_final.ZugewieseneSlots) {
+            expect(zuweisung.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+        }
+        for(const zuweisung of anfrage3_final.ZugewieseneSlots) {
+            expect(zuweisung.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+        }
+    });
+
     // Weitere Testfälle für updateKonflikt (z.B. wenn Kapazität nicht ausreicht, Entgeltphase etc.)
 });
 
