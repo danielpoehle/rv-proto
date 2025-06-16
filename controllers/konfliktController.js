@@ -646,6 +646,7 @@ exports.getKonfliktById = async (req, res) => {
             return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
         }
 
+        // Schritt 1: Lade das Konfliktdokument und seine direkten Referenzen
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
             // Stufe 1: Populiere den auslösenden Kapazitätstopf
             .populate({
@@ -673,9 +674,20 @@ exports.getKonfliktById = async (req, res) => {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
         } 
 
+        // Schritt 2: - Finde die übergeordnete Konfliktgruppe
+        const gruppe = await KonfliktGruppe.findOne({ 
+            konflikteInGruppe: konflikt._id 
+        }).select('_id'); // Wir brauchen nur die ID der Gruppe
+
+        // Schritt 3: Reichere die Antwortdaten an
+        const responseData = {
+            konflikt: konflikt,
+            gruppenId: gruppe ? gruppe._id : null // Füge die gefundene Gruppen-ID hinzu (oder null)
+        };
+
         res.status(200).json({
             message: 'Konfliktdokumentation erfolgreich abgerufen.',
-            data: konflikt
+            data: responseData
         });
 
     } catch (error) {
@@ -894,7 +906,7 @@ exports.identifiziereKonfliktGruppen = async (req, res) => {
         const filter = { status: { $ne: 'vollstaendig_geloest' } };
 
         const gruppen = await KonfliktGruppe.find(filter)
-            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Entgelt')
+            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Entgelt Verkehrsart')
             .populate({
                 path: 'konflikteInGruppe',
                 select: 'status ausloesenderKapazitaetstopf',
