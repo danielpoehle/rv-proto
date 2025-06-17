@@ -1575,3 +1575,37 @@ exports.resetKonfliktGruppe = async (req, res) => {
         res.status(500).json({ message: 'Serverfehler beim Zurücksetzen der Gruppe.' });
     }
 };
+
+// @desc    Ruft eine einzelne, detaillierte Konfliktgruppe ab
+// @route   GET /api/konflikte/gruppen/:gruppenId
+exports.getKonfliktGruppeById = async (req, res) => {
+    const { gruppenId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) {
+        return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    }
+    try {
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Verkehrsart Status Entgelt Email')
+            .populate({
+                path: 'konflikteInGruppe',
+                select: 'ausloesenderKapazitaetstopf',
+                populate: {
+                    path: 'ausloesenderKapazitaetstopf',
+                    select: 'Abschnitt Kalenderwoche Verkehrstag Zeitfenster'
+                }
+            });
+
+        if (!gruppe) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        }
+
+        res.status(200).json({
+            message: 'Konfliktgruppe erfolgreich abgerufen.',
+            data: gruppe
+        });
+    } catch (error) {
+        console.error(`Fehler beim Abrufen der Konfliktgruppe ${gruppenId}:`, error);
+        res.status(500).json({ message: 'Serverfehler.' });
+    }
+};

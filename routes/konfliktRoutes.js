@@ -38,6 +38,10 @@ router.put('/:konfliktId/entgeltvergleich', konfliktController.fuehreEntgeltverg
 // @route   PUT /api/konflikte/:konfliktId/hoechstpreis-ergebnis
 router.put('/:konfliktId/hoechstpreis-ergebnis', konfliktController.verarbeiteHoechstpreisErgebnis);
 
+// ROUTE für die Detail- und Bearbeitungsseite einer Gruppe
+// @route   GET /api/konflikte/gruppen/:gruppenId
+router.get('/gruppen/:gruppenId', konfliktController.getKonfliktGruppeById);
+
 // ROUTEN für die phasenweise GRUPPEN-Konfliktlösung
 // Phase 1: Verzicht und Verschub für eine Gruppe
 // @route   PUT /api/konflikte/gruppen/:gruppenId/verzicht-verschub
