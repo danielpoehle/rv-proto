@@ -431,8 +431,16 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
 exports.identifiziereTopfKonflikte = async (req, res) => {
     try {
         const alleToepfe = await Kapazitaetstopf.find({})
-            .populate('ListeDerAnfragen', '_id AnfrageID_Sprechend Status Entgelt') // Entgelt für spätere Reihung
-            .populate('ListeDerSlots', '_id SlotID_Sprechend');
+            .populate({
+                path: 'ListeDerAnfragen',
+                select: '_id AnfrageID_Sprechend Status Entgelt ZugewieseneSlots',
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf' // Wir brauchen den Verweis, um zu diesem Topf zurückzumappen
+                }
+            })
+            .populate('ListeDerSlots', '_id SlotID_Sprechend'); // Dies kann für das Logging bleiben
 
         let neuErstellteKonfliktDokus = [];
         let aktualisierteUndGeoeffneteKonflikte = [];
@@ -441,7 +449,29 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
         let toepfeOhneKonflikt = [];
 
         for (const topf of alleToepfe) {
-            const istUeberbucht = topf.ListeDerAnfragen.length > topf.maxKapazitaet;
+            // --- Intelligente Zählung der Belegung des Topfes ---
+            let aktiveAnfragenAnzahl = 0;
+            const aktiveAnfragenIdsFuerDiesenTopf = [];
+            for (const anfrage of topf.ListeDerAnfragen) {
+                // Prüfe, ob DIESE Anfrage für DIESEN Topf noch aktiv am Konflikt teilnimmt
+                const istAktivFuerDiesenTopf = anfrage.ZugewieseneSlots.some(zuweisung => {
+                    // 1. Gehört der zugewiesene Slot zu dem Topf, den wir gerade prüfen?
+                    const gehoertZuDiesemTopf = zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(topf._id);
+                    if (!gehoertZuDiesemTopf) return false;
+
+                    // 2. Ist der Status KEIN Ablehnungs- oder Verschiebungsstatus?
+                    const istKeinAblehnungsstatus = !zuweisung.statusEinzelzuweisung.startsWith('abgelehnt_topf_');
+                    
+                    return istKeinAblehnungsstatus;
+                });
+
+                if (istAktivFuerDiesenTopf) {
+                    aktiveAnfragenAnzahl++;
+                    aktiveAnfragenIdsFuerDiesenTopf.push(anfrage._id);
+                }
+            }
+
+            const istUeberbucht = aktiveAnfragenAnzahl > topf.maxKapazitaet;
 
             if (istUeberbucht) {
                 console.log(`Konflikt in Topf ${topf.TopfID || topf._id}: ${topf.ListeDerAnfragen.length} Anfragen > maxKap ${topf.maxKapazitaet}`);

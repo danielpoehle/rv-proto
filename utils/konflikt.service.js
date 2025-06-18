@@ -23,18 +23,22 @@ async function aktualisiereKonfliktGruppen() {
             
             const anfrageIdsStrings = konflikt.beteiligteAnfragen.map(a => a.toString()).sort();
             const gruppenSchluessel = anfrageIdsStrings.join('#');
+            const konfliktStatus = konflikt.status;
             
             if (!gruppenMap.has(gruppenSchluessel)) {
                 gruppenMap.set(gruppenSchluessel, {
                     beteiligteAnfragen: konflikt.beteiligteAnfragen,
-                    konflikteInGruppe: []
+                    konflikteInGruppe: [],
+                    konfliktStatus: []
                 });
             }
             gruppenMap.get(gruppenSchluessel).konflikteInGruppe.push(konflikt._id);
+            gruppenMap.get(gruppenSchluessel).konfliktStatus.push(konfliktStatus);
         }
 
         // 3. Führe für jede gefundene Gruppe ein "Upsert" (Update or Insert) in der DB durch
         for (const [gruppenSchluessel, gruppe] of gruppenMap.entries()) {
+            //hier zunächst den Status ermitteln aus dem array gruppenmap.konfliktStatus
             await KonfliktGruppe.findOneAndUpdate(
                 { gruppenSchluessel: gruppenSchluessel }, // Finde Gruppe mit diesem eindeutigen Schlüssel
                 { 

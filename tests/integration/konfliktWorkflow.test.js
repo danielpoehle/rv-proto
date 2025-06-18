@@ -259,16 +259,13 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             expect(loesenResponse.body.data.zugewieseneAnfragen).toHaveLength(2); // A1, A2 sollten zugewiesen sein
 
             // B. Neue Situation schaffen: Eine weitere Anfrage kommt hinzu
-            anfrageNeu = await new Anfrage({ EVU: "ReopenEVU", Zugnummer: "R5", 
+            anfrageNeu = await new Anfrage({ EVU: "ReopenEVU", Zugnummer: "R5", Status: 'validiert',
                 Email: "reopen@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", 
                 Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Entgelt: 200,
-                ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:2}, Ankunftszeit:{stunde:14,minute:0}}] }).save();
+                ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:20}, Ankunftszeit:{stunde:14,minute:0}}] }).save();
             //console.log(anfrageNeu);
 
-            // Füge die neue Anfrage zur ListeDerAnfragen des Topfes hinzu
-            const kt_vorNeuerAnfrage = await Kapazitaetstopf.findById(kt_DetectConflict._id);
-            kt_vorNeuerAnfrage.ListeDerAnfragen.push(anfrageNeu._id);
-            await kt_vorNeuerAnfrage.save(); // Jetzt 5 Anfragen im Topf (A1,A2,A3,A4,A5) -> Überbuchung
+            await request(app).post(`/api/anfragen/${anfrageNeu._id}/zuordnen`).send();            
 
             // C. Aktion: Konflikterkennung erneut anstoßen
             const identResponse2 = await request(app)
@@ -1241,6 +1238,10 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         // Slots für Topf 09-11
         for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 9, minute: i*10 }, Ankunft: { stunde: 10, minute: i*10 } }); }
         
+        const s1 = await Slot.findOne({Abfahrt: { stunde: 7, minute: 10 }});
+        const s2 = await Slot.findOne({Abfahrt: { stunde: 9, minute: 10 }});
+        //console.log(`Der gespeicherte Slot lautet ${s1}`);
+
         // Töpfe aus DB laden und prüfen
         kt_0507 = await Kapazitaetstopf.findOne({ Abschnitt: "Analyse-Strecke", Zeitfenster: "05-07", Kalenderwoche: 4 });
         kt_0709 = await Kapazitaetstopf.findOne({ Abschnitt: "Analyse-Strecke", Zeitfenster: "07-09", Kalenderwoche: 4 });
@@ -1258,9 +1259,14 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         expect(kt_0709.TopfIDNachfolger.toString()).toBe(kt_0911._id.toString());
 
         // 2. Anfragen erstellen
-        const anfrageBasis = { EVU: "AnalyseEVU", Email: "analyse@evu.com", Verkehrsart: "SPFV", 
+        const anfrageBasis = { EVU: "AnalyseEVU", Email: "analyse@evu.com", Verkehrsart: "SPFV", Status: 'validiert',
                                Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-01-20", ende: "2025-01-26" },
-                               ListeGewuenschterSlotAbschnitte: [{von: "Analyse-A", bis:"Analyse-B", Abfahrtszeit: {stunde:7, minute:10}, Ankunftszeit:{stunde:8,minute:10}}]}; // KW 4
+                               ListeGewuenschterSlotAbschnitte: [{von: "Analyse-A", bis:"Analyse-B", Abfahrtszeit: {stunde:7, minute:10}, Ankunftszeit:{stunde:8,minute:10}}],
+                               ZugewieseneSlots: [
+                                                { slot: s1._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
+                                                // Für Einfachheit nehmen wir an, jede Anfrage bezieht sich auf einen der erstellten Slots.
+                                                // In Realität würden sie sich ggf. die gleichen Slots teilen.
+                                ]};
         
         // 3 Anfragen für den Konflikt in Topf 07-09
         for(let i=1; i<=3; i++) {
@@ -1269,8 +1275,18 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         }
         // 3 Anfragen für die Belegung von Topf 09-11
         for(let i=1; i<=3; i++) {
-            const anfr = await new Anfrage({ ...anfrageBasis, Zugnummer: `B${i}` }).save();
+            const anfr = await new Anfrage({ ...anfrageBasis, Zugnummer: `B${i}`,
+                Abfahrtszeit: {stunde:9, minute:10}, Ankunftszeit:{stunde:10,minute:10},
+             ZugewieseneSlots: [
+                                { slot: s2._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
+                                // Für Einfachheit nehmen wir an, jede Anfrage bezieht sich auf einen der erstellten Slots.
+                                // In Realität würden sie sich ggf. die gleichen Slots teilen.
+                                ]}).save();
             anfragenFuerBelegung.push(anfr);
+        }
+
+        for(anfrage in anfragenFuerKonflikt){
+
         }
 
         // 3. Töpfe manuell mit Anfragen befüllen, um die Situation herzustellen
@@ -1283,7 +1299,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
 
         let r = await KonfliktGruppe.find({});
-        console.log(r);
+        //console.log(r);
 
         // Erzeuge im Test den exakten Schlüssel, den wir erwarten
         let erwarteteAnfrageIds = anfragenFuerKonflikt.map(a => a._id.toString()).sort();
