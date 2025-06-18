@@ -11,10 +11,9 @@ async function aktualisiereKonfliktGruppen() {
     console.log("Starte Synchronisation der Konfliktgruppen...");
     
     try {
-        // 1. Finde alle Konfliktdokumente, die noch nicht final gelöst sind
-        const relevanteKonflikte = await KonfliktDokumentation.find({ 
-            status: { $nin: ['geloest', 'eskaliert'] } 
-        }).select('beteiligteAnfragen');
+        // 1. Lade ALLE Konfliktdokumente, um den gesamten "Soll-Zustand" zu erfassen.
+        const relevanteKonflikte = await KonfliktDokumentation.find({}).select('beteiligteAnfragen');
+
 
         const gruppenMap = new Map();
 
@@ -49,7 +48,20 @@ async function aktualisiereKonfliktGruppen() {
                 },
                 { upsert: true, new: true }
             );
-        }        
+        }  
+        
+        // === Veraltete Gruppen löschen ===
+        // 4. Sammle alle Schlüssel der aktuell gültigen Gruppen
+        const alleAktuellenGruppenSchluessel = Array.from(gruppenMap.keys());
+
+        // 5. Lösche alle Gruppen aus der DB, deren Schlüssel NICHT in der aktuellen Liste ist
+        const deleteResult = await KonfliktGruppe.deleteMany({ 
+            gruppenSchluessel: { $nin: alleAktuellenGruppenSchluessel } 
+        });
+
+        if (deleteResult.deletedCount > 0) {
+            console.log(`${deleteResult.deletedCount} veraltete Konfliktgruppen wurden gelöscht.`);
+        }
 
         console.log(`Synchronisation abgeschlossen. ${gruppenMap.size} Konfliktgruppen in der DB.`);
     } catch (err) {

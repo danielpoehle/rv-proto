@@ -903,9 +903,9 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
 exports.identifiziereKonfliktGruppen = async (req, res) => {
     try {        
         // Filtere optional nach Status der Gruppe, z.B. alle, die nicht gelöst sind
-        const filter = { status: { $ne: 'vollstaendig_geloest' } };
+        //const filter = { status: { $ne: 'vollstaendig_geloest' } };
 
-        const gruppen = await KonfliktGruppe.find(filter)
+        const gruppen = await KonfliktGruppe.find()//find(filter)
             .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Entgelt Verkehrsart')
             .populate({
                 path: 'konflikteInGruppe',
@@ -1592,7 +1592,7 @@ exports.getKonfliktGruppeById = async (req, res) => {
                 select: 'ausloesenderKapazitaetstopf',
                 populate: {
                     path: 'ausloesenderKapazitaetstopf',
-                    select: 'Abschnitt Kalenderwoche Verkehrstag Zeitfenster'
+                    select: 'TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet'
                 }
             });
 
