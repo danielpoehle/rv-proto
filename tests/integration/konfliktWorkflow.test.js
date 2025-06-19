@@ -1304,8 +1304,8 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
 
         // Erzeuge im Test den exakten Schlüssel, den wir erwarten
         let erwarteteAnfrageIds = anfragenFuerKonflikt.map(a => a._id.toString()).sort();
-        //console.log(erwarteteAnfrageIds);
-        let erwarteterGruppenSchluessel = erwarteteAnfrageIds.join('#');
+        //console.log(erwarteteAnfrageIds);        
+        let erwarteterGruppenSchluessel = `${kt_0507.maxKapazitaet}|${erwarteteAnfrageIds.join('#')}`;
 
         //console.log(`Erwarteter Schlüssel Gruppe 1: ${erwarteterGruppenSchluessel}`);
 
@@ -1316,7 +1316,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         expect(konfliktGruppe).not.toBeNull();
 
         erwarteteAnfrageIds = anfragenFuerBelegung.map(a => a._id.toString()).sort();
-        erwarteterGruppenSchluessel = erwarteteAnfrageIds.join('#');
+        erwarteterGruppenSchluessel = `${kt_0507.maxKapazitaet}|${erwarteteAnfrageIds.join('#')}`;
 
         //console.log(`Erwarteter Schlüssel Gruppe 2: ${erwarteterGruppenSchluessel}`);
 

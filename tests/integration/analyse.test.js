@@ -111,7 +111,10 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         // --- VORBEREITUNG: Finde die Gruppe für den Konflikt mit allen 4 Anfragen auf Abschnitt X-B ---
         let anfragenIdsFuerGruppe = await Anfrage.find({});
         anfragenIdsFuerGruppe = anfragenIdsFuerGruppe.map(a => a._id.toString()).sort();
-        const gruppenSchluessel = anfragenIdsFuerGruppe.join('#');
+        let kapatopf_xb_maxkapa = await Kapazitaetstopf.findOne({Abschnitt: "X-B"});
+        kapatopf_xb_maxkapa = kapatopf_xb_maxkapa.maxKapazitaet;
+        const gruppenSchluessel = `${kapatopf_xb_maxkapa}|${anfragenIdsFuerGruppe.join('#')}`;
+        console.log(gruppenSchluessel);
         const konfliktGruppe = await KonfliktGruppe.findOne({ gruppenSchluessel: gruppenSchluessel });
         expect(konfliktGruppe).not.toBeNull();
 

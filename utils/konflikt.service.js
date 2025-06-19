@@ -50,7 +50,10 @@ async function aktualisiereKonfliktGruppen() {
     
     try {
         // 1. Lade ALLE Konfliktdokumente, um den gesamten "Soll-Zustand" zu erfassen.
-        const relevanteKonflikte = await KonfliktDokumentation.find({}).select('beteiligteAnfragen status');
+        const relevanteKonflikte = await KonfliktDokumentation.find({})
+            .select('beteiligteAnfragen status ausloesenderKapazitaetstopf')
+            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet'); // Lade maxKapazitaet mit
+
 
 
         const gruppenMap = new Map();
@@ -60,8 +63,9 @@ async function aktualisiereKonfliktGruppen() {
             if (!konflikt.beteiligteAnfragen || konflikt.beteiligteAnfragen.length === 0) continue;
             
             const anfrageIdsStrings = konflikt.beteiligteAnfragen.map(a => a.toString()).sort();
-            const gruppenSchluessel = anfrageIdsStrings.join('#');
-            const konfliktStatus = konflikt.status;
+            const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+            // Schlüssel: "maxKap|anfrageId1#anfrageId2#..."
+            const gruppenSchluessel = `${maxKap}|${anfrageIdsStrings.join('#')}`;          
             
             if (!gruppenMap.has(gruppenSchluessel)) {
                 gruppenMap.set(gruppenSchluessel, {
@@ -75,8 +79,8 @@ async function aktualisiereKonfliktGruppen() {
 
         // 3. Führe für jede gefundene Gruppe ein "Upsert" (Update or Insert) in der DB durch
         for (const [gruppenSchluessel, gruppe] of gruppenMap.entries()) {
-            //hier zunächst den Status ermitteln aus dem array gruppenmap.konfliktStatus
-            const neuerGruppenStatus = determineGruppenStatus(gruppe.konflikteInGruppe);
+            const konflikteDerGruppe = await KonfliktDokumentation.find({ _id: { $in: gruppe.konflikteInGruppe } }).select('status');
+            const neuerGruppenStatus = determineGruppenStatus(konflikteDerGruppe);
             await KonfliktGruppe.findOneAndUpdate(
                 { gruppenSchluessel: gruppenSchluessel }, // Finde Gruppe mit diesem eindeutigen Schlüssel
                 { 
