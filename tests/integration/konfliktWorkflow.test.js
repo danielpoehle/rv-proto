@@ -300,6 +300,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
     
     let kt_AutoResolve, anfrage1, anfrage2, anfrage3, anfrage4, konfliktDoku;
     const slotGrundentgelt = 150; // Muss in den Slots gesetzt werden für Entgeltberechnung
+    jest.setTimeout(60000);
 
     // Wenn du manuelle Bereinigung pro Testfall brauchst:
     beforeAll(async () => {

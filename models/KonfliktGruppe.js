@@ -25,12 +25,12 @@ const konfliktGruppeSchema = new Schema({
         type: String,
         required: true,
         enum: [
-            'offen',                          // Gruppe wurde neu identifiziert oder ein gelöster Konflikt darin wurde neu aufgerollt
-            'in_bearbeitung_verzicht',      // NEU: Die Gruppe wird gerade bzgl. Verzicht/Verschub bearbeitet
-            'in_bearbeitung_entgelt',         // Die Gruppe befindet sich im Entgeltvergleich
-            'in_bearbeitung_hoechstpreis',    // Die Gruppe befindet sich im Höchstpreisverfahren
-            'teilweise_geloest',              // Einige, aber nicht alle Konflikte in der Gruppe sind gelöst
-            'vollstaendig_geloest'          // Alle Konflikte in der Gruppe sind gelöst
+            'offen',                          // Alle Einzelkonflikte sind 'offen'
+            'in_bearbeitung_verzicht',        // Alle Einzelkonflikte sind 'in_bearbeitung' (vor Verzicht)
+            'in_bearbeitung_entgelt',         // Alle Einzelkonflikte sind 'in_bearbeitung_entgelt'
+            'in_bearbeitung_hoechstpreis',    // Alle Einzelkonflikte sind 'in_bearbeitung_hoechstpreis'
+            'vollstaendig_geloest',           // Alle Einzelkonflikte sind 'geloest'
+            'invalide'                        // Die Einzelkonflikte haben unterschiedliche Status
         ],
         default: 'offen'
     },

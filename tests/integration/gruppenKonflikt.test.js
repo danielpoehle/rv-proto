@@ -484,3 +484,128 @@ describe('Gruppierte Konfliktlösung', () => {
         expect(anfrage_D_final.Status).toBe('final_abgelehnt'); 
     });
 });
+
+describe('Konfliktgruppen-Status-Synchronisation', () => {
+
+        beforeAll(async () => {
+            // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
+            // Diese Verbindung muss die URI zur Docker-DB nutzen
+            await mongoose.connect(process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots');
+        });
+    
+        afterAll(async () => {
+            await mongoose.disconnect();
+        });
+
+        beforeEach(async () => {
+            // 0. Datenbank leeren
+            if (mongoose.connection.readyState === 0) {
+                    const testDbUri = process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots';
+                    await mongoose.connect(testDbUri);
+            }
+            // Leere Collections
+            const collections = mongoose.connection.collections;        
+            for (const key in collections) {
+                //console.log(key);
+                const collection = collections[key];
+                await collection.deleteMany({});
+            }
+        });
+
+        it('sollte den Gruppenstatus auf "invalide" setzen, wenn die Einzelkonflikte bei gleicher Kapazität der Töpfe unterschiedliche Status haben', async () => {
+            // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichem Status ----
+
+            const commonSlotParams1 = {
+                von: "S", bis: "T", Abschnitt: "Sued",
+                Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
+                Grundentgelt: 150, Verkehrstag: "Mo-Fr"
+            };
+
+            for (let kw = 11; kw <= 12; kw++) {
+                
+                    // Erstelle 2 Slots pro Topf-Definition, um maxKap=1 zu erhalten
+                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw });
+                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });             
+                
+            }
+
+            const s1 = await Slot.findOne({Kalenderwoche: 11});
+            const s2 = await Slot.findOne({Kalenderwoche: 12});
+
+            // 1. Lade die beiden Kapazitätstöpfe
+            const kt_A = await Kapazitaetstopf.findOne({Kalenderwoche: 11});
+            const kt_B = await Kapazitaetstopf.findOne({Kalenderwoche: 12});
+            
+            // 2. Erstelle zwei Anfragen
+            await new Anfrage({ Zugnummer: "X1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
+            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+
+            let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
+            let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
+            await request(app).post(`/api/anfragen/${anfrage_X._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Y._id}/zuordnen`).send();
+
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_X.Status = 'validiert'; anfrage_X.save();
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Y.Status = 'validiert'; anfrage_Y.save();
+            
+
+            // 3. Erstelle zwei Konfliktdokumente und die eine Gruppe
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Finde die resultierende Gruppe in der DB. Es darf nur eine geben.
+            let anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(1);
+
+            const kdA = await KonfliktDokumentation.findOne({ausloesenderKapazitaetstopf: kt_A._id});
+            const kdB = await KonfliktDokumentation.findOne({ausloesenderKapazitaetstopf: kt_B._id});
+            //console.log(kt_A);
+            //console.log(kd);
+            
+            // ---- AKTION: Nur eine der Konflikt-Dokus lösen ----
+            // In der Realität würde dieser Aufruf nur für die gesamte Gruppe passieren, nicht einzeln
+            response = await request(app)
+                .put(`/api/konflikte/${kdA._id}/verzicht-verschub`)
+                .send({});
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+            const kd_entgelt = await KonfliktDokumentation.findById(kdA._id);
+            expect(kd_entgelt.status).toBe('in_bearbeitung_entgelt');
+            
+
+            // 4. Erstelle erneut die Konfliktgruppen 
+            response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Finde die resultierende Gruppe in der DB. Es darf nur eine geben.
+            anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(1);
+
+            const gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+
+            //console.log(gruppe);
+
+            // Der Status der Gruppe muss 'invalide' sein
+            expect(gruppe.status).toBe('invalide');
+
+            // Die Gruppe sollte beide Konfliktdokumente enthalten
+            expect(gruppe.konflikteInGruppe).toHaveLength(2);
+            const konfliktIdsInGruppe = gruppe.konflikteInGruppe.map(id => id.toString());
+            expect(konfliktIdsInGruppe).toContain(kdA._id.toString());
+            expect(konfliktIdsInGruppe).toContain(kdB._id.toString());
+        });
+    });

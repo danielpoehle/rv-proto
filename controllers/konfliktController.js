@@ -750,6 +750,8 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
         return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
     }
 
+    //console.log(`konfliktId ${konfliktId}, ListeAnfragenMitVerzicht ${ListeAnfragenMitVerzicht}`);
+
     try {
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
             .populate('beteiligteAnfragen', '_id Status Entgelt') // Lade _id und Status für Filterung und Entgelt für Info
