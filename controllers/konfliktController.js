@@ -424,6 +424,35 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
     return {anfragenToSave};
 }
 
+
+/**
+ * Zählt die Anzahl der Anfragen, die in einem Kapazitätstopf aktiv um Kapazität konkurrieren.
+ * @param {Document} topf - Ein voll populiertes Kapazitätstopf-Dokument.
+ * (Benötigt: topf.ListeDerAnfragen -> mit .ZugewieseneSlots -> mit .slot.VerweisAufTopf)
+ * @returns {number} Die Anzahl der aktiven Anfragen.
+ */
+function getAktiveAnfragenAnzahlFuerTopf(topf) {
+    if (!topf || !topf.ListeDerAnfragen) return 0;
+
+    let aktiveAnfragenAnzahl = 0;
+    for (const anfrage of topf.ListeDerAnfragen) {
+        if (!anfrage.ZugewieseneSlots) continue;
+
+        const istAktivFuerDiesenTopf = anfrage.ZugewieseneSlots.some(zuweisung => {
+            const gehoertZuDiesemTopf = zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(topf._id);
+            if (!gehoertZuDiesemTopf) return false;
+            
+            const istKeinAblehnungsstatus = !zuweisung.statusEinzelzuweisung.startsWith('abgelehnt_');
+            return istKeinAblehnungsstatus;
+        });
+
+        if (istAktivFuerDiesenTopf) {
+            aktiveAnfragenAnzahl++;
+        }
+    }
+    return aktiveAnfragenAnzahl;
+}
+
 // @desc    Synchronisiert Konfliktstatus: Identifiziert Überbuchungen in Töpfen,
 //          erstellt/aktualisiert Konfliktdokumente UND aktualisiert den Status
 //          der betroffenen Slot-Zuweisungen in den Anfragen.
@@ -450,31 +479,12 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
 
         for (const topf of alleToepfe) {
             // --- Intelligente Zählung der Belegung des Topfes ---
-            let aktiveAnfragenAnzahl = 0;
-            const aktiveAnfragenIdsFuerDiesenTopf = [];
-            for (const anfrage of topf.ListeDerAnfragen) {
-                // Prüfe, ob DIESE Anfrage für DIESEN Topf noch aktiv am Konflikt teilnimmt
-                const istAktivFuerDiesenTopf = anfrage.ZugewieseneSlots.some(zuweisung => {
-                    // 1. Gehört der zugewiesene Slot zu dem Topf, den wir gerade prüfen?
-                    const gehoertZuDiesemTopf = zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(topf._id);
-                    if (!gehoertZuDiesemTopf) return false;
-
-                    // 2. Ist der Status KEIN Ablehnungs- oder Verschiebungsstatus?
-                    const istKeinAblehnungsstatus = !zuweisung.statusEinzelzuweisung.startsWith('abgelehnt_topf_');
-                    
-                    return istKeinAblehnungsstatus;
-                });
-
-                if (istAktivFuerDiesenTopf) {
-                    aktiveAnfragenAnzahl++;
-                    aktiveAnfragenIdsFuerDiesenTopf.push(anfrage._id);
-                }
-            }
+            let aktiveAnfragenAnzahl = getAktiveAnfragenAnzahlFuerTopf(topf);
 
             const istUeberbucht = aktiveAnfragenAnzahl > topf.maxKapazitaet;
 
             if (istUeberbucht) {
-                console.log(`Konflikt in Topf ${topf.TopfID || topf._id}: ${topf.ListeDerAnfragen.length} Anfragen > maxKap ${topf.maxKapazitaet}`);
+                console.log(`Konflikt in Topf ${topf.TopfID || topf._id}: ${aktiveAnfragenAnzahl} Anfragen > maxKap ${topf.maxKapazitaet}`);
 
                 // 1. Konfliktdokument erstellen oder aktualisieren
                 let konfliktDoku = await KonfliktDokumentation.findOne({
@@ -1271,10 +1281,7 @@ exports.getVerschiebeAnalyseFuerGruppe = async (req, res) => {
         const gruppe = await KonfliktGruppe.findById(gruppenId)
             .populate({
                 path: 'konflikteInGruppe',
-                populate: {
-                    path: 'ausloesenderKapazitaetstopf',
-                    select: 'TopfIDVorgänger TopfIDNachfolger TopfID' // Lade Links und ID des auslösenden Topfes
-                }
+                populate: { path: 'ausloesenderKapazitaetstopf', select: 'TopfIDVorgänger TopfIDNachfolger TopfID' }
             })
             .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Zugnummer');
 
@@ -1292,10 +1299,20 @@ exports.getVerschiebeAnalyseFuerGruppe = async (req, res) => {
             }
         }
 
-        // 3. Lade alle Nachbar-Töpfe und ihre Kapazitätsdaten in einer einzigen Abfrage
+        // 3. Lade alle Nachbar-Töpfe mit allen für die Zählung benötigten, tief 
+        // verschachtelten Daten in einer einzigen Abfrage
         const nachbarToepfeDetails = await Kapazitaetstopf.find({
             _id: { $in: Array.from(nachbarTopfIds) }
-        }).select('maxKapazitaet ListeDerAnfragen TopfID'); // WICHTIG: TopfID mitladen
+        }).select('maxKapazitaet ListeDerAnfragen TopfID')
+          .populate({
+                path: 'ListeDerAnfragen',
+                select: 'ZugewieseneSlots',
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf'
+                }
+            });
 
         // Konvertiere die Ergebnisliste in eine Map für schnellen Zugriff
         const nachbarToepfeMap = new Map();
@@ -1326,10 +1343,11 @@ exports.getVerschiebeAnalyseFuerGruppe = async (req, res) => {
                 if (topf.TopfIDVorgänger) {
                     const vorgänger = nachbarToepfeMap.get(topf.TopfIDVorgänger.toString());
                     if (vorgänger) {
+                        const aktiveAnzahl = getAktiveAnfragenAnzahlFuerTopf(vorgänger);
                         vorgängerObjekt = {
                             _id: vorgänger._id,
                             TopfID: vorgänger.TopfID, // Sprechende ID des Vorgängers
-                            Status: vorgänger.ListeDerAnfragen.length < vorgänger.maxKapazitaet ? 'frei' : 'belegt'
+                            Status: aktiveAnzahl < vorgänger.maxKapazitaet ? 'frei' : 'belegt'
                         };
                     }
                 }
@@ -1339,10 +1357,11 @@ exports.getVerschiebeAnalyseFuerGruppe = async (req, res) => {
                 if (topf.TopfIDNachfolger) {
                     const nachfolger = nachbarToepfeMap.get(topf.TopfIDNachfolger.toString());
                     if (nachfolger) {
+                        const aktiveAnzahl = getAktiveAnfragenAnzahlFuerTopf(nachfolger);
                         nachfolgerObjekt = {
                             _id: nachfolger._id,
                             TopfID: nachfolger.TopfID, // Sprechende ID des Nachfolgers
-                            Status: nachfolger.ListeDerAnfragen.length < nachfolger.maxKapazitaet ? 'frei' : 'belegt'
+                            Status: aktiveAnzahl < nachfolger.maxKapazitaet ? 'frei' : 'belegt'
                         };
                     }
                 }
@@ -1430,15 +1449,31 @@ exports.getAlternativSlotsFuerGruppe = async (req, res) => {
             Kalenderwoche: { $in: Array.from(relevanteKonfliktKWs) },
             Verkehrstag: { $in: Array.from(relevanteVerkehrstage) }, // NEUER, EFFIZIENTER FILTER
             $or: desiredVonBisPairs
-        }).populate({
+        })
+        // Tieferes Populate, um Daten für die Zählung zu bekommen
+        .populate({
             path: 'VerweisAufTopf',
-            select: 'maxKapazitaet ListeDerAnfragen TopfID Zeitfenster'
+            populate: {
+                path: 'ListeDerAnfragen',
+                select: 'ZugewieseneSlots',
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf'
+                }
+            }
         });
 
         // Filtere diese Slots weiter: Nur die, deren Kapazitätstopf ebenfalls frei ist
-        const finalAlternativeSlots = potentialAlternativeSlots.filter(slot => 
-            slot.VerweisAufTopf && slot.VerweisAufTopf.ListeDerAnfragen.length < slot.VerweisAufTopf.maxKapazitaet
-        );
+         const finalAlternativeSlots = potentialAlternativeSlots.filter(slot => {
+            if (!slot.VerweisAufTopf) return false;
+            
+            // Rufe die zentrale Hilfsfunktion zum Zählen auf
+            const aktiveAnzahlImTopf = getAktiveAnfragenAnzahlFuerTopf(slot.VerweisAufTopf);
+            
+            // Vergleiche die "aktive" Anzahl mit der maxKapazitaet
+            return aktiveAnzahlImTopf < slot.VerweisAufTopf.maxKapazitaet;
+        });
 
         // 4. Baue einen Cache auf für schnellen Zugriff: KW -> AbschnittKey -> [Slots]
         const alternativesCache = {};
