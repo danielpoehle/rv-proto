@@ -145,6 +145,11 @@ async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenM
         konflikt.status = 'in_bearbeitung_entgelt';
         konflikt.zugewieseneAnfragen = []; // Noch keine finale Zuweisung in diesem Schritt
         konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub nicht gelöst. Nächster Schritt: Entgeltvergleich.`;
+        for (const anfrageDoc of aktiveAnfragenImKonflikt) {
+            const updatedAnfrage =  await updateAnfrageSlotsStatusFuerTopf(anfrageDoc._id, 'wartet_entgeltentscheidung_topf', ausloesenderTopfId);
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            anfrageDoc.markModified
+        }
         console.log(`Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
     }
     // Alte Resolution-Felder zurücksetzen, falls dies eine neue Lösung ist
