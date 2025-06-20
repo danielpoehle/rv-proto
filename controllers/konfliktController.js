@@ -496,6 +496,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                 if (konfliktDoku) {
                     const gespeicherteAnfragenImKonfliktIds = konfliktDoku.beteiligteAnfragen;
                     if (!sindObjectIdArraysGleich(aktuelleAnfragenAmTopfIds, gespeicherteAnfragenImKonfliktIds)) {
+                        //Anfragen im Topf haben sich verändert, Reset der Konfliktdoku und der zugehörigen Status der Anfragen für diesen Topf
                         console.log(`Konfliktdokument ${konfliktDoku._id} für Topf ${topf.TopfID}: Beteiligte Anfragen haben sich geändert. Wird zurückgesetzt.`);
                         konfliktDoku.beteiligteAnfragen = aktuelleAnfragenAmTopfIds;
                         konfliktDoku.konfliktTyp = 'KAPAZITAETSTOPF';
@@ -512,11 +513,16 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                         
                         await konfliktDoku.save();
                         aktualisierteUndGeoeffneteKonflikte.push(konfliktDoku);
-                    } else {
+                        
+                        // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
+                        for (const anfrage of topf.ListeDerAnfragen) {
+                            await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'wartet_konflikt_topf', topf._id);
+                        }
+                    } else { // Anfragen im Topf sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist
                         console.log(`Konfliktdokument ${konfliktDoku._id} für Topf ${topf.TopfID}: Beteiligte Anfragen sind identisch. Status (${konfliktDoku.status}) bleibt erhalten.`);
                         unveraenderteBestehendeKonflikte.push(konfliktDoku);
                     }
-                } else {
+                } else { // Topf ist überbuht aber es gibt noch keine Konfliktdoku --> neu initial anlegen
                     const neuesKonfliktDoku = new KonfliktDokumentation({
                         beteiligteAnfragen: aktuelleAnfragenAmTopfIds,
                         ausloesenderKapazitaetstopf: topf._id,
@@ -526,31 +532,27 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     });
                     await neuesKonfliktDoku.save();
                     neuErstellteKonfliktDokus.push(neuesKonfliktDoku);
+                    
+                    // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
+                    for (const anfrage of topf.ListeDerAnfragen) {
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'wartet_konflikt_topf', topf._id);
+                    }
+
                     console.log(`Neues Konfliktdokument ${neuesKonfliktDoku._id} für Topf ${topf.TopfID} erstellt.`);
                 }
-
-                // 2. Status der Anfragen aktualisieren
-                // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
-                for (const anfrage of topf.ListeDerAnfragen) {
-                    await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'wartet_konflikt_topf', topf._id);
-                }
-
-            } else {
+            } else { // Topf ist nicht überbucht: Entweder er hatte keinen Konflikt oder wurde früher schon gelöst.
                 toepfeOhneKonflikt.push(topf.TopfID || topf._id);
 
-                // 1. Status der Anfragen aktualisieren
-                // Alle Anfragen in diesem Topf sind für die Slots dieses Topfes "bestätigt" (auf Topf-Ebene)
-                for (const anfrage of topf.ListeDerAnfragen) {
-                    await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'bestaetigt_topf', topf._id);
-                }
+                let offenerKonflikt = await KonfliktDokumentation.findOne({
+                    ausloesenderKapazitaetstopf: topf._id
+                }).sort({ updatedAt: -1 });
 
-                // 2. Prüfen, ob für diesen Topf ein alter, offener Konflikt existiert und ihn automatisch lösen
-                const offenerKonflikt = await KonfliktDokumentation.findOne({
-                    ausloesenderKapazitaetstopf: topf._id,
-                    status: { $ne: 'geloest' } // Finde einen, der noch nicht als gelöst markiert ist
-                });
-
-                if (offenerKonflikt) {
+                // Status der Anfragen aktualisieren, wenn der Konflikt noch nicht gelöst wurde                
+                if(offenerKonflikt && offenerKonflikt.status !== 'geloest'){
+                    // Alle Anfragen in diesem Topf sind für die Slots dieses Topfes "bestätigt" (auf Topf-Ebene)
+                    for (const anfrage of topf.ListeDerAnfragen) {
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'bestaetigt_topf', topf._id);
+                    }
                     console.log(`Konflikt ${offenerKonflikt._id} für Topf ${topf.TopfID} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
                     offenerKonflikt.status = 'geloest';
                     offenerKonflikt.abschlussdatum = new Date();
@@ -559,6 +561,14 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     offenerKonflikt.zugewieseneAnfragen = topf.ListeDerAnfragen.map(a => a._id);
                     await offenerKonflikt.save();
                     autoGeloesteKonflikte.push(offenerKonflikt);
+                }
+                // Wenn keine Konfliktdoku existiert, dann war der Topf nie überbucht und kann gelöst werden
+                if(!offenerKonflikt){
+                    for (const anfrage of topf.ListeDerAnfragen) {
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'bestaetigt_topf', topf._id);
+                    }
+                    console.log(`Topf ${topf.TopfID} hatte keinen Konflikt und die Anfragen werden automatisch auf 'bestaetigt_topf' gesetzt, da keine Überbuchung besteht.`);
+
                 }
             }
         }
