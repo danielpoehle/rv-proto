@@ -85,17 +85,17 @@ describe('Gruppierte Konfliktlösung', () => {
             ende: addDays(parseISO(GLOBAL_KW1_START_DATE_ISO), (anzahlWochen * 7) - 1) // Ende KW 3
         };
         const anfrageBasis = {
-            EVU: "GruppenEVU", Email: "gruppe@evu.com", Verkehrsart: "SPFV", Verkehrstag: "täglich",
+            Email: "gruppe@evu.com", Verkehrsart: "SPFV", Verkehrstag: "täglich",
             ListeGewuenschterSlotAbschnitte: [{ von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abfahrtszeit: { stunde: 9, minute: 0 }, Ankunftszeit: { stunde: 10, minute: 0 } },
                                               { von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abfahrtszeit: { stunde: 10, minute: 0 }, Ankunftszeit: { stunde: 11, minute: 0 } }
             ],
             Zeitraum: anfrageZeitraum, Status: "validiert"
         };
 
-        anfrage_A = await new Anfrage({ ...anfrageBasis, Zugnummer: "GA"}).save();
-        anfrage_B = await new Anfrage({ ...anfrageBasis, Zugnummer: "GB"}).save();        
-        anfrage_C = await new Anfrage({ ...anfrageBasis, Zugnummer: "GC"}).save();        
-        anfrage_D = await new Anfrage({ ...anfrageBasis, Zugnummer: "GD"}).save();        
+        anfrage_A = await new Anfrage({ ...anfrageBasis, EVU: "GruppenEVU1", Zugnummer: "GA"}).save();
+        anfrage_B = await new Anfrage({ ...anfrageBasis, EVU: "GruppenEVU2", Zugnummer: "GB"}).save();        
+        anfrage_C = await new Anfrage({ ...anfrageBasis, EVU: "GruppenEVU3", Zugnummer: "GC"}).save();        
+        anfrage_D = await new Anfrage({ ...anfrageBasis, EVU: "GruppenEVU4", Zugnummer: "GD"}).save();        
 
         // 3. Zuordnungsprozess für die Anfragen anstoßen -> Erzeugt die Konfliktsituation
         await request(app).post(`/api/anfragen/${anfrage_A._id}/zuordnen`).send();
@@ -537,9 +537,9 @@ describe('Konfliktgruppen-Status-Synchronisation', () => {
             const kt_B = await Kapazitaetstopf.findOne({Kalenderwoche: 12});
             
             // 2. Erstelle zwei Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
             ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
             ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
@@ -642,11 +642,11 @@ describe('Konfliktgruppen-Status-Synchronisation', () => {
             const kt_B = await Kapazitaetstopf.findOne({Kbschnitt: 'Sued', Kalenderwoche: 11});
             
             // 2. Erstelle zwei Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            await new Anfrage({ Zugnummer: "X1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
             ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
             ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
+            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv5", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
             ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});

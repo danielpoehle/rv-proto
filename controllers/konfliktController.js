@@ -165,31 +165,96 @@ async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenM
  * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
  * in der Phase "Entgeltvergleich". Modifiziert Dokumente im Speicher.
  * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
+ * @param {Array} [evuReihungen=[]] - Optionale, vom Koordinator übermittelte Reihung für EVUs.
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
  */
-async function resolveEntgeltvergleichForSingleConflict(konflikt) {
+async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen = {}) {
         //console.log(konflikt);
-        const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
-        const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+        const ausloesenderTopf = konflikt.ausloesenderKapazitaetstopf; // Ist bereits populiert
+        const ausloesenderTopfId = ausloesenderTopf._id;
+        const maxKap = ausloesenderTopf.maxKapazitaet;
         let anfragenToSave = new Map();
+
+        // Dokumentiere die übermittelte EVU-Reihung
+        if (evuReihungen && evuReihungen.length > 0) {
+            konflikt.evuReihungen = evuReihungen;
+            konflikt.markModified('evuReihungen');
+        }
+
+        // Lade die ListeDerSlots des Topfes, um die Gesamtanzahl für die Marktanteil-Regel zu bekommen
+        // Dies erfordert, dass der aufrufende Controller den Topf mit .populate('ListeDerSlots') lädt.
+        // Wir stellen das im `fuehreEinzelEntgeltvergleichDurch` sicher.
+        if (!ausloesenderTopf.ListeDerSlots) {
+            throw new Error(`ListeDerSlots für Topf ${ausloesenderTopf.TopfID} nicht geladen. Population im Controller erforderlich.`);
+        }
+        //Das Limit sind 80% der 70% zu vergebender RV-Kapazität, also insgesamt maximal abgerundet 56% aller Slots in diesem Topf
+        const evuMarktanteilLimit = Math.floor(0.56 * ausloesenderTopf.ListeDerSlots.length);
+        konflikt.abgelehnteAnfragenMarktanteil = []; // Zurücksetzen für diese Runde
+        console.log(`Marktanteil-Limit für jedes EVU in diesem Topf: ${evuMarktanteilLimit} Kapazitäten`);
 
         // Aktive Anfragen für diesen Konflikt ermitteln (die nicht verzichtet oder verschoben wurden)
         // Dies basiert auf den bereits im Konfliktdokument gespeicherten Listen
         const anfragenIdsMitVerzicht = new Set((konflikt.ListeAnfragenMitVerzicht || []).map(id => id.toString()));
         const anfragenIdsMitVerschub = new Set((konflikt.ListeAnfragenVerschubKoordination || []).map(item => item.anfrage.toString()));
-        
-        const aktiveAnfragenFuerEntgeltvergleich = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
+
+        let aktiveAnfragenPool = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
             !anfragenIdsMitVerzicht.has(anfrageDoc._id.toString()) && 
             !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
         );
+
+        // ----- PHASE 2a - EVU-interne Reihung und Marktanteil-Filterung -----
+        const anfragenProEVU = new Map();
+        aktiveAnfragenPool.forEach(a => {
+            if (!anfragenProEVU.has(a.EVU)) anfragenProEVU.set(a.EVU, []);
+            anfragenProEVU.get(a.EVU).push(a);
+        });
+
+        let aktiveAnfragenFuerEntgeltvergleich = [];
+
+        for (const [evu, anfragen] of anfragenProEVU.entries()) {
+            if (anfragen.length > evuMarktanteilLimit) {
+                let reihungFuerEVU = {};
+                if(evuReihungen.length > 0){
+                    reihungFuerEVU = evuReihungen.find(r => r.evu === evu);
+                }
+
+                if (!reihungFuerEVU || !reihungFuerEVU.anfrageIds || reihungFuerEVU.anfrageIds.length < anfragen.length) {
+                    // Fehler: Wenn ein EVU über dem Limit ist, MUSS eine vollständige Reihung übermittelt werden.
+                    throw new Error(`Für EVU "${evu}" ist eine vollständige Reihung erforderlich, da die Anzahl der Anfragen (${anfragen.length}) das Marktanteil-Limit (${evuMarktanteilLimit}) übersteigt.`);
+                }
+
+                const priorisierteAnfrageIds = new Set(reihungFuerEVU.anfrageIds.slice(0, evuMarktanteilLimit).map(id => id.toString()));
+                
+                for (const anfrage of anfragen) {
+                    if (priorisierteAnfrageIds.has(anfrage._id.toString())) {
+                        aktiveAnfragenFuerEntgeltvergleich.push(anfrage); // Diese Anfrage darf am Entgeltvergleich teilnehmen
+                        console.log(`Anfrage ${anfrage.AnfrageID_Sprechend} von ${anfrage.EVU} ist unterhalb des Marktanteil-Limits (${evuMarktanteilLimit}) und wird in den Entgeltvergleich aufgenommen.`);
+                        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${anfrage.AnfrageID_Sprechend} von ${anfrage.EVU} ist unterhalb des Marktanteil-Limits (${evuMarktanteilLimit}) und wird in den Entgeltvergleich aufgenommen.`;
+                    } else {
+                        konflikt.abgelehnteAnfragenMarktanteil.push(anfrage._id); // Diese wird wegen EVU-Reihung abgelehnt
+                        console.log(`Anfrage ${anfrage.AnfrageID_Sprechend} von ${anfrage.EVU} wegen Marktanteil-Limit (${evuMarktanteilLimit}) abgelehnt.`);
+                        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${anfrage.AnfrageID_Sprechend} von ${anfrage.EVU} wegen Marktanteil-Limit (${evuMarktanteilLimit}) abgelehnt.`;
+                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'abgelehnt_topf_marktanteil', ausloesenderTopfId);
+                        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                    }
+                }
+            } else {
+                // EVU ist innerhalb seines Limits, alle Anfragen bleiben im Pool
+                aktiveAnfragenFuerEntgeltvergleich.push(...anfragen);
+                console.log(`Alle Anfragen von ${anfragen[0].EVU} sind unterhalb des Marktanteil-Limits (${evuMarktanteilLimit}) und werden in den Entgeltvergleich aufgenommen.`);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Alle Anfragen von ${anfragen[0].EVU} sind unterhalb des Marktanteil-Limits (${evuMarktanteilLimit}) und werden in den Entgeltvergleich aufgenommen.`;
+            }
+        }
+        konflikt.markModified('abgelehnteAnfragenMarktanteil');        
         
+        // ----- PHASE 2b - EVU-übergreifender Entgeltvergleich (mit der bereinigten Liste) -----
         console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
 
         // ReihungEntgelt automatisch erstellen und sortieren
         konflikt.ReihungEntgelt = aktiveAnfragenFuerEntgeltvergleich
             .map(anfr => ({
                 anfrage: anfr._id,
-                entgelt: anfr.Entgelt || 0, // Nutze das in der Anfrage gespeicherte Entgelt
+                entgelt: anfr.Entgelt || 0, // Nutze das in der Anfrage gespeicherte Entgelt                
             }))
             .sort((a, b) => (b.entgelt || 0) - (a.entgelt || 0)); // Absteigend nach Entgelt
 
@@ -201,17 +266,22 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
         konflikt.zugewieseneAnfragen = [];
         konflikt.abgelehnteAnfragenEntgeltvergleich = [];
         konflikt.abgelehnteAnfragenHoechstpreis = []; // Sicherstellen, dass dies auch leer ist für diese Phase
+        
             
         let aktuelleKapazitaetBelegt = 0;
         let anfragenFuerHoechstpreis = []; // Sammelt Anfrage-IDs für den Fall eines Gleichstands
         let letztesAkzeptiertesEntgelt = null;
         let entgeltGleichstand = 0;
 
+
+        
+
         for (const gereihteAnfrageItem of konflikt.ReihungEntgelt) {
             const anfrageId = gereihteAnfrageItem.anfrage; // Ist bereits ObjectId
             const anfrageEntgelt = gereihteAnfrageItem.entgelt;
 
-            if (aktuelleKapazitaetBelegt < maxKap) {
+            if (aktuelleKapazitaetBelegt < maxKap) {              
+
                 // Dieser Block prüft, ob die aktuelle Anfrage noch in die Kapazität passt.
                 // Und ob es einen Gleichstand mit der nächsten gibt, falls dieser die Kapazität sprengen würde.
                 let istGleichstandAnGrenze = false;
@@ -288,6 +358,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt) {
         
         konflikt.markModified('zugewieseneAnfragen');
         konflikt.markModified('abgelehnteAnfragenEntgeltvergleich');
+        konflikt.markModified('abgelehnteAnfragenMarktanteil');
 
     return { anfragenToSave };
 };
@@ -831,7 +902,7 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
 // @route   PUT /api/konflikte/:konfliktId/entgeltvergleich
 exports.fuehreEntgeltvergleichDurch = async (req, res) => {    
     const { konfliktId } = req.params;
-    const { notizen, notizenUpdateMode } = req.body || {}; // Nur Notizen werden optional erwartet
+    const { notizen, notizenUpdateMode, evuReihungen } = req.body || {}; // Nur Notizen werden optional erwartet
 
     if (!mongoose.Types.ObjectId.isValid(konfliktId)) {
         return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
@@ -840,7 +911,7 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
     try {
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
             .populate('beteiligteAnfragen', '_id Status Entgelt AnfrageID_Sprechend EVU')
-            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet TopfID _id');
+            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet TopfID _id ListeDerSlots');
 
         if (!konflikt) {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
@@ -855,7 +926,7 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
         }
 
         // Rufe die zentrale Service-Funktion auf
-        const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt);
+        const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen);
        
 
         //#######################################
@@ -873,6 +944,13 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
         }
 
         const aktualisierterKonflikt = await konflikt.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            //console.log(anfrageDoc);
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
 
         res.status(200).json({
             message: `Entgeltvergleich für Konflikt ${konflikt.TopfID || konflikt._id} durchgeführt. Neuer Status: ${aktualisierterKonflikt.status}`,
@@ -1086,7 +1164,7 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
 // @route   PUT /api/konflikte/gruppen/:gruppenId/entgeltvergleich
 exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
     const { gruppenId } = req.params;
-    const { notizen, notizenUpdateMode } = req.body || {};
+    const { notizen, notizenUpdateMode, evuReihungen } = req.body || {};
     
     // ... (Validierung und Laden der Gruppe wie in verarbeiteGruppenVerzichtVerschub) ...
     if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
@@ -1102,7 +1180,7 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
                 populate: [ // NEU: Array, um mehrere Felder innerhalb der Konfliktdokumente zu populieren
                     {
                         path: 'ausloesenderKapazitaetstopf',
-                        select: 'maxKapazitaet TopfID _id'
+                        select: 'maxKapazitaet TopfID _id ListeDerSlots'
                     },
                     {
                         path: 'beteiligteAnfragen', // JETZT wird auch dieses Feld in jedem Einzelkonflikt populiert
@@ -1121,7 +1199,7 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
         for (const konflikt of gruppe.konflikteInGruppe) {
             // Rufe die zentrale Service-Funktion auf
             //console.log(konflikt);
-            const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt);
+            const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen);
 
             // Füge modifizierte Anfragen zur Map hinzu
             anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));

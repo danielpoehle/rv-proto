@@ -1,11 +1,18 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 
+const evuReihungSchema = new Schema({
+    evu: { type: String, required: true },
+    anfrageIds: [{ type: Schema.Types.ObjectId, ref: 'Anfrage' }]
+}, { _id: false });
+
 const konfliktDokumentationSchema = new Schema({
     beteiligteAnfragen: [{ type: Schema.Types.ObjectId, ref: 'Anfrage', required: true }],
     zugewieseneAnfragen: [{ type: Schema.Types.ObjectId, ref: 'Anfrage' }],
     abgelehnteAnfragenEntgeltvergleich: [{ type: Schema.Types.ObjectId, ref: 'Anfrage' }],
     abgelehnteAnfragenHoechstpreis: [{ type: Schema.Types.ObjectId, ref: 'Anfrage' }],
+    abgelehnteAnfragenMarktanteil: [{ type: Schema.Types.ObjectId, ref: 'Anfrage' }],
+    evuReihungen: [evuReihungSchema],
     ReihungEntgelt: [{
         anfrage: { type: Schema.Types.ObjectId, ref: 'Anfrage' },
         entgelt: Number,

@@ -92,11 +92,11 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             expect(kt_NoConflict2.maxKapazitaet).toBe(2);
 
             // 4 Anfragen erstellen für KonfliktZone1 und KonfliktZone2
-            const anfrageBasis = { EVU: "ConflictEVU", Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
-            const anfrageBasis2 = { EVU: "ConflictEVU2", Email: "conflict@evu2.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
+            const anfrageBasis = { Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
+            const anfrageBasis2 = { EVU: "ConflictEVU4", Email: "conflict@evu2.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
             const anfragePromises = [];
             for (let i = 1; i <= 3; i++) {
-                anfragePromises.push(new Anfrage({ ...anfrageBasis, Zugnummer: `C${i}`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 + (i-1)*10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+                anfragePromises.push(new Anfrage({ ...anfrageBasis, EVU: `ConflictEVU${i}` , Zugnummer: `C${i}`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 + (i-1)*10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
             }
             anfragePromises.push(new Anfrage({ ...anfrageBasis2, Zugnummer: `C4`, 
                                                ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}},
@@ -106,7 +106,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             anfragenIds = erstellteAnfragen.map(a => a._id);  
             
             // 1 Anfrage erstellen für KonfliktZone3
-            let anfrage_A = await new Anfrage({ ...anfrageBasis2, Zugnummer: "C5", 
+            let anfrage_A = await new Anfrage({ ...anfrageBasis2, EVU: "ConflictEVU5" , Zugnummer: "C5", 
                                             ListeGewuenschterSlotAbschnitte: [{von: "V", bis:"W", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}]
                                         }).save();
 
@@ -355,7 +355,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             //    Die Entgelte werden hier im Test manuell gesetzt, um den Fokus auf die Konfliktlösung zu legen.
             //    In einem echten Szenario wären sie durch den Zuordnungsprozess berechnet worden.
             const anfrageBasis = { 
-                EVU: "TestEVU", Email: "test@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                 Email: "test@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
                 Zeitraum: { start: "2024-12-30", ende: "2025-01-05" }, // 1 Woche Mo-Fr = 5 Tage
                 ListeGewuenschterSlotAbschnitte: [{von: "X", bis:"Y", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}],
                 // Simuliere, dass Slots initial zugewiesen wurden und einen Status haben
@@ -366,9 +366,9 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
                 ]
             };
             
-            anfrage1 = await new Anfrage({ ...anfrageBasis, Zugnummer: "A1", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf' }).save();
-            anfrage2 = await new Anfrage({ ...anfrageBasis, Zugnummer: "A2", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf', ZugewieseneSlots: [{ slot: s2Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
-            anfrage3 = await new Anfrage({ ...anfrageBasis, Zugnummer: "A3", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf', ZugewieseneSlots: [{ slot: s3Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
+            anfrage1 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU1", Zugnummer: "A1", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf' }).save();
+            anfrage2 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU2", Zugnummer: "A2", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf', ZugewieseneSlots: [{ slot: s2Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
+            anfrage3 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU3", Zugnummer: "A3", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf', ZugewieseneSlots: [{ slot: s3Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
             
 
             // Vereinfachtes Setup für diesen Test: Wir fokussieren auf die Konfliktlösung, nicht die Zuordnung.
@@ -462,11 +462,11 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             slot: s._id,
             statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'
         }));
-        const anfrageBasis = { EVU: "ResetEVU", Email: "reset@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2024-12-30", ende: "2025-01-05" }, ListeGewuenschterSlotAbschnitte: [{von: "R", bis:"S", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
+        const anfrageBasis = { Email: "reset@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2024-12-30", ende: "2025-01-05" }, ListeGewuenschterSlotAbschnitte: [{von: "R", bis:"S", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
         
-        let anfrage1 = await new Anfrage({ ...anfrageBasis, Zugnummer: "R1", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
-        let anfrage2 = await new Anfrage({ ...anfrageBasis, Zugnummer: "R2", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
-        let anfrage3 = await new Anfrage({ ...anfrageBasis, Zugnummer: "R3", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
+        let anfrage1 = await new Anfrage({ ...anfrageBasis, EVU: "ResetEVU1", Zugnummer: "R1", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
+        let anfrage2 = await new Anfrage({ ...anfrageBasis, EVU: "ResetEVU2", Zugnummer: "R2", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
+        let anfrage3 = await new Anfrage({ ...anfrageBasis, EVU: "ResetEVU3", Zugnummer: "R3", Entgelt: 500, Status: 'in_konfliktloesung_topf' }).save();
         
         kt_Reset.ListeDerAnfragen = [anfrage1._id, anfrage2._id, anfrage3._id]; // 3 Anfragen -> Konflikt
         await kt_Reset.save();
@@ -625,14 +625,14 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             
 
             // 2. Anfragen erstellen mit vorbefülltem Entgelt und initial zugewiesenen Slots
-            const anfrageBasis = { EVU: "EntgeltEVU", Email: "entgelt@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "E1", bis:"E2", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: [{ slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] };
+            const anfrageBasis = { Email: "entgelt@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "E1", bis:"E2", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: [{ slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] };
             
             const zeitraumHoch = { start: "2025-01-20", ende: "2025-01-31" }; // 10 Tage
-            anfrageHoch = await new Anfrage({ ...anfrageBasis, Zugnummer: "Hoch", Zeitraum: zeitraumHoch, Entgelt: 10 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageHoch = await new Anfrage({ ...anfrageBasis, EVU: "EntgeltEVU1",  Zugnummer: "Hoch", Zeitraum: zeitraumHoch, Entgelt: 10 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
             const zeitraumMittel = { start: "2025-01-20", ende: "2025-01-28" }; // 7 Tage
-            anfrageMittel = await new Anfrage({ ...anfrageBasis, Zugnummer: "Mittel", Zeitraum: zeitraumMittel, Entgelt: 7 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageMittel = await new Anfrage({ ...anfrageBasis, EVU: "EntgeltEVU2",  Zugnummer: "Mittel", Zeitraum: zeitraumMittel, Entgelt: 7 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
             const zeitraumNiedrig = { start: "2025-01-20", ende: "2025-01-24" }; // 5 Tage
-            anfrageNiedrig = await new Anfrage({ ...anfrageBasis, Zugnummer: "Niedrig", Zeitraum: zeitraumNiedrig, Entgelt: 5 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageNiedrig = await new Anfrage({ ...anfrageBasis, EVU: "EntgeltEVU3",  Zugnummer: "Niedrig", Zeitraum: zeitraumNiedrig, Entgelt: 5 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
 
             kt_Entgelt.ListeDerAnfragen = [anfrageHoch._id, anfrageMittel._id, anfrageNiedrig._id];
             await kt_Entgelt.save();
@@ -709,17 +709,17 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             expect(kt_TieBreak.maxKapazitaet).toBe(2);
 
             // 2. Anfragen mit Entgelten erstellen, die zu Gleichstand führen
-            const anfrageBasisTie = { EVU: "TieEVU", Email: "tie@evu.com", Verkehrsart: "SGV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "T1", bis:"T2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: [{ slot: sT1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
+            const anfrageBasisTie = { Email: "tie@evu.com", Verkehrsart: "SGV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "T1", bis:"T2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: [{ slot: sT1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
 
             const zeitraumA1 = { start: "2025-02-03", ende: "2025-02-14" }; // 10 Tage -> Entgelt 1000
-            anfrageA1 = await new Anfrage({ ...anfrageBasisTie, Zugnummer: "TA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageA1 = await new Anfrage({ ...anfrageBasisTie, EVU: "TieEVU1", Zugnummer: "TA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
 
             const zeitraumA2_A3 = { start: "2025-02-03", ende: "2025-02-13" }; // 9 Tage -> Entgelt 900
-            anfrageA2 = await new Anfrage({ ...anfrageBasisTie, Zugnummer: "TA2", Zeitraum: zeitraumA2_A3, Entgelt: 9 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
-            anfrageA3 = await new Anfrage({ ...anfrageBasisTie, Zugnummer: "TA3", Zeitraum: zeitraumA2_A3, Entgelt: 9 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageA2 = await new Anfrage({ ...anfrageBasisTie, EVU: "TieEVU2", Zugnummer: "TA2", Zeitraum: zeitraumA2_A3, Entgelt: 9 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageA3 = await new Anfrage({ ...anfrageBasisTie, EVU: "TieEVU3", Zugnummer: "TA3", Zeitraum: zeitraumA2_A3, Entgelt: 9 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
 
             const zeitraumA4 = { start: "2025-02-03", ende: "2025-02-11" }; // 7 Tage -> Entgelt 700
-            anfrageA4 = await new Anfrage({ ...anfrageBasisTie, Zugnummer: "TA4", Zeitraum: zeitraumA4, Entgelt: 7 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
+            anfrageA4 = await new Anfrage({ ...anfrageBasisTie, EVU: "TieEVU4", Zugnummer: "TA4", Zeitraum: zeitraumA4, Entgelt: 7 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
             
             // 3. Konfliktdokument erstellen
             kt_TieBreak.ListeDerAnfragen = [anfrageA1._id, anfrageA2._id, anfrageA3._id, anfrageA4._id];
@@ -792,19 +792,19 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // 2. Anfragen erstellen: A1 (1000), B (900), C (900), D(800)
             const anfrageBasisHP = { 
-                EVU: "HPEVU1", Email: "hp1@evu.com", Verkehrsart: "SPNV", Verkehrstag: "Mo-Fr", 
+                Email: "hp1@evu.com", Verkehrsart: "SPNV", Verkehrstag: "Mo-Fr", 
                 ListeGewuenschterSlotAbschnitte: [{von: "HP1", bis:"HP2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], 
                 // Annahme, dass der Zuordnungsprozess jeder Anfrage alle 3 Slots zuwies
                 ZugewieseneSlots: (await Slot.find({ VerweisAufTopf: kt_HP._id })).map(s => ({ slot: s._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }))
             };
             
             const zeitraumA1 = { start: "2025-02-17", ende: "2025-02-28" }; // 10 Tage
-            anfrageHP_A1 = await new Anfrage({ ...anfrageBasisHP, Zugnummer: "HPA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+            anfrageHP_A1 = await new Anfrage({ ...anfrageBasisHP, EVU: "HPEVU11", Zugnummer: "HPA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
             const zeitraumBC = { start: "2025-02-17", ende: "2025-02-27" }; // 9 Tage
-            anfrageHP_B = await new Anfrage({ ...anfrageBasisHP, Zugnummer: "HPB", Zeitraum: zeitraumBC, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
-            anfrageHP_C = await new Anfrage({ ...anfrageBasisHP, Zugnummer: "HPC", Zeitraum: zeitraumBC, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+            anfrageHP_B = await new Anfrage({ ...anfrageBasisHP, EVU: "HPEVU12", Zugnummer: "HPB", Zeitraum: zeitraumBC, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+            anfrageHP_C = await new Anfrage({ ...anfrageBasisHP, EVU: "HPEVU13", Zugnummer: "HPC", Zeitraum: zeitraumBC, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
             const zeitraumD = { start: "2025-02-17", ende: "2025-02-25" }; // 7 Tage
-            anfrageHP_D = await new Anfrage({ ...anfrageBasisHP, Zugnummer: "HPD", Zeitraum: zeitraumD, Entgelt: 7 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+            anfrageHP_D = await new Anfrage({ ...anfrageBasisHP, EVU: "HPEVU14", Zugnummer: "HPD", Zeitraum: zeitraumD, Entgelt: 7 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
             
             kt_HP.ListeDerAnfragen = [anfrageHP_A1._id, anfrageHP_B._id, anfrageHP_C._id, anfrageHP_D._id];
             await kt_HP.save();
@@ -904,14 +904,14 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             slot: s._id,
             statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'
         }));
-        const anfrageBasisHPTie = { EVU: "HPTIE_EVU", Email: "hptie@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "TIE1", bis:"TIE2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
+        const anfrageBasisHPTie = { Email: "hptie@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "TIE1", bis:"TIE2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
         
         const zeitraumA1 = { start: "2025-02-24", ende: "2025-03-07" }; // 10 Tage
-        anfrage_HPT_A1 = await new Anfrage({ ...anfrageBasisHPTie, Zugnummer: "HPTA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+        anfrage_HPT_A1 = await new Anfrage({ ...anfrageBasisHPTie, EVU: "HPTIE_EVU1", Zugnummer: "HPTA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
         const zeitraumRest = { start: "2025-02-24", ende: "2025-03-06" }; // 9 Tage
-        anfrage_HPT_B = await new Anfrage({ ...anfrageBasisHPTie, Zugnummer: "HPTB", Zeitraum: zeitraumRest, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
-        anfrage_HPT_C = await new Anfrage({ ...anfrageBasisHPTie, Zugnummer: "HPTC", Zeitraum: zeitraumRest, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
-        anfrage_HPT_E = await new Anfrage({ ...anfrageBasisHPTie, Zugnummer: "HPTE", Zeitraum: zeitraumRest, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save(); // E hat auch 900
+        anfrage_HPT_B = await new Anfrage({ ...anfrageBasisHPTie, EVU: "HPTIE_EVU2", Zugnummer: "HPTB", Zeitraum: zeitraumRest, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+        anfrage_HPT_C = await new Anfrage({ ...anfrageBasisHPTie, EVU: "HPTIE_EVU3", Zugnummer: "HPTC", Zeitraum: zeitraumRest, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save();
+        anfrage_HPT_E = await new Anfrage({ ...anfrageBasisHPTie, EVU: "HPTIE_EVU4", Zugnummer: "HPTE", Zeitraum: zeitraumRest, Entgelt: 9 * slotGrundentgeltHP, Status: "in_konfliktloesung_topf" }).save(); // E hat auch 900
         
         kt_HPTie.ListeDerAnfragen = [anfrage_HPT_A1._id, anfrage_HPT_B._id, anfrage_HPT_C._id, anfrage_HPT_E._id];
         await kt_HPTie.save();
@@ -1010,15 +1010,15 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             expect(kt_InvBid.maxKapazitaet).toBe(1);
 
             // 2. Anfragen erstellen: A1 (200), B (150), C (100)
-            const anfrageBasisInv = { EVU: "InvBidEVU", Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
+            const anfrageBasisInv = { Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
             const zeitraumA1 = { start: "2025-03-01", ende: "2025-03-09" }; // 4 Tage (2x Sa+So)
-            anfrageInv_A1 = await new Anfrage({ ...anfrageBasisInv, Zugnummer: "InvA1", Zeitraum: zeitraumA1, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
+            anfrageInv_A1 = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU1", Zugnummer: "InvA1", Zeitraum: zeitraumA1, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
             
             const zeitraumB = { start: "2025-03-01", ende: "2025-03-09" }; // 4 Tage (2x Sa, 1x So)
-            anfrageInv_B = await new Anfrage({ ...anfrageBasisInv, Zugnummer: "InvB", Zeitraum: zeitraumB, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
+            anfrageInv_B = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU2", Zugnummer: "InvB", Zeitraum: zeitraumB, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
 
             const zeitraumC = { start: "2025-03-01", ende: "2025-03-02" }; // 2 Tage (1x Sa+So)
-            anfrageInv_C = await new Anfrage({ ...anfrageBasisInv, Zugnummer: "InvC", Zeitraum: zeitraumC, Entgelt: 2 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 100
+            anfrageInv_C = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU3", Zugnummer: "InvC", Zeitraum: zeitraumC, Entgelt: 2 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 100
 
             // 3. Konflikt erzeugen und in HP-Status bringen
             kt_InvBid.ListeDerAnfragen = [anfrageInv_A1._id, anfrageInv_B._id, anfrageInv_C._id];
@@ -1108,15 +1108,15 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             expect(kt_InvBid.maxKapazitaet).toBe(1);
 
             // 2. Anfragen erstellen: A1 (200), B (150), C (100)
-            const anfrageBasisInv = { EVU: "InvBidEVU", Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
+            const anfrageBasisInv = { Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
             const zeitraumA1 = { start: "2025-03-01", ende: "2025-03-09" }; // 4 Tage (2x Sa+So)
-            anfrageInv_A1 = await new Anfrage({ ...anfrageBasisInv, Zugnummer: "InvA1", Zeitraum: zeitraumA1, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
+            anfrageInv_A1 = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU4", Zugnummer: "InvA1", Zeitraum: zeitraumA1, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
             
             const zeitraumB = { start: "2025-03-01", ende: "2025-03-09" }; // 4 Tage (2x Sa, 1x So)
-            anfrageInv_B = await new Anfrage({ ...anfrageBasisInv, Zugnummer: "InvB", Zeitraum: zeitraumB, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
+            anfrageInv_B = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU5", Zugnummer: "InvB", Zeitraum: zeitraumB, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
 
             const zeitraumC = { start: "2025-03-01", ende: "2025-03-02" }; // 2 Tage (1x Sa+So)
-            anfrageInv_C = await new Anfrage({ ...anfrageBasisInv, Zugnummer: "InvC", Zeitraum: zeitraumC, Entgelt: 2 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 100
+            anfrageInv_C = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU6", Zugnummer: "InvC", Zeitraum: zeitraumC, Entgelt: 2 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 100
 
             // 3. Konflikt erzeugen und in HP-Status bringen
             kt_InvBid.ListeDerAnfragen = [anfrageInv_A1._id, anfrageInv_B._id, anfrageInv_C._id];
@@ -1260,7 +1260,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         expect(kt_0709.TopfIDNachfolger.toString()).toBe(kt_0911._id.toString());
 
         // 2. Anfragen erstellen
-        const anfrageBasis = { EVU: "AnalyseEVU", Email: "analyse@evu.com", Verkehrsart: "SPFV", Status: 'validiert',
+        const anfrageBasis = { Email: "analyse@evu.com", Verkehrsart: "SPFV", Status: 'validiert',
                                Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-01-20", ende: "2025-01-26" },
                                ListeGewuenschterSlotAbschnitte: [{von: "Analyse-A", bis:"Analyse-B", Abfahrtszeit: {stunde:7, minute:10}, Ankunftszeit:{stunde:8,minute:10}}],
                                ZugewieseneSlots: [
@@ -1271,12 +1271,12 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         
         // 3 Anfragen für den Konflikt in Topf 07-09
         for(let i=1; i<=3; i++) {
-            const anfr = await new Anfrage({ ...anfrageBasis, Zugnummer: `A${i}` }).save();
+            const anfr = await new Anfrage({ ...anfrageBasis, EVU: `AnalyseEVU${i}`, Zugnummer: `A${i}` }).save();
             anfragenFuerKonflikt.push(anfr);
         }
         // 3 Anfragen für die Belegung von Topf 09-11
         for(let i=1; i<=3; i++) {
-            const anfr = await new Anfrage({ ...anfrageBasis, Zugnummer: `B${i}`,
+            const anfr = await new Anfrage({ ...anfrageBasis, EVU: `BelegungEVU${i}`, Zugnummer: `B${i}`,
                 Abfahrtszeit: {stunde:9, minute:10}, Ankunftszeit:{stunde:10,minute:10},
              ZugewieseneSlots: [
                                 { slot: s2._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
@@ -1284,10 +1284,6 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
                                 // In Realität würden sie sich ggf. die gleichen Slots teilen.
                                 ]}).save();
             anfragenFuerBelegung.push(anfr);
-        }
-
-        for(anfrage in anfragenFuerKonflikt){
-
         }
 
         // 3. Töpfe manuell mit Anfragen befüllen, um die Situation herzustellen
