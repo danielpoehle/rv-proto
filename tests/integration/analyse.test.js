@@ -80,13 +80,13 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
 
         // Anfragen erstellen
         const zeitraum3Wochen = { start: addDays(parseISO(GLOBAL_KW1_START_DATE_ISO), 7), ende: addDays(parseISO(GLOBAL_KW1_START_DATE_ISO), 27) }; // KW 2, 3, 4
-        const a1_data = {Email: "a1@evu.de", Zugnummer: "T1", EVU: "Test", Verkehrsart: "SPFV", Verkehrstag: "täglich", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "A", bis: "X", Abfahrtszeit: { stunde: 9, minute: 0 }, Ankunftszeit: { stunde: 10, minute: 0 } }, { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 0 }, Ankunftszeit: { stunde: 12, minute: 0 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 0 }, Ankunftszeit: { stunde: 14, minute: 0 } } ] };
+        const a1_data = {Email: "a1@evu.de", Zugnummer: "T1", EVU: "Test1", Verkehrsart: "SPFV", Verkehrstag: "täglich", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "A", bis: "X", Abfahrtszeit: { stunde: 9, minute: 0 }, Ankunftszeit: { stunde: 10, minute: 0 } }, { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 0 }, Ankunftszeit: { stunde: 12, minute: 0 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 0 }, Ankunftszeit: { stunde: 14, minute: 0 } } ] };
         await request(app).post('/api/anfragen').send(a1_data);
-        const a2_data = {Email: "a1@evu.de", Zugnummer: "T2", EVU: "Test", Verkehrsart: "SPFV", Verkehrstag: "täglich", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "A", bis: "X", Abfahrtszeit: { stunde: 9, minute: 20 }, Ankunftszeit: { stunde: 10, minute: 20 } }, { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 20 }, Ankunftszeit: { stunde: 12, minute: 20 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 20 }, Ankunftszeit: { stunde: 14, minute: 20 } } ] };
+        const a2_data = {Email: "a1@evu.de", Zugnummer: "T2", EVU: "Test2", Verkehrsart: "SPFV", Verkehrstag: "täglich", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "A", bis: "X", Abfahrtszeit: { stunde: 9, minute: 20 }, Ankunftszeit: { stunde: 10, minute: 20 } }, { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 20 }, Ankunftszeit: { stunde: 12, minute: 20 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 20 }, Ankunftszeit: { stunde: 14, minute: 20 } } ] };
         await request(app).post('/api/anfragen').send(a2_data);
-        const a3_data = {Email: "a1@evu.de", Zugnummer: "T3", EVU: "Test", Verkehrsart: "SPFV", Verkehrstag: "täglich", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "A", bis: "X", Abfahrtszeit: { stunde: 9, minute: 40 }, Ankunftszeit: { stunde: 10, minute: 40 } }, { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 40 }, Ankunftszeit: { stunde: 12, minute: 40 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 40 }, Ankunftszeit: { stunde: 14, minute: 40 } } ] };
+        const a3_data = {Email: "a1@evu.de", Zugnummer: "T3", EVU: "Test3", Verkehrsart: "SPFV", Verkehrstag: "täglich", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "A", bis: "X", Abfahrtszeit: { stunde: 9, minute: 40 }, Ankunftszeit: { stunde: 10, minute: 40 } }, { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 40 }, Ankunftszeit: { stunde: 12, minute: 40 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 40 }, Ankunftszeit: { stunde: 14, minute: 40 } } ] };
         await request(app).post('/api/anfragen').send(a3_data);
-        const a4_data = {Email: "a1@evu.de", Zugnummer: "T4", EVU: "Test", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 40 }, Ankunftszeit: { stunde: 12, minute: 40 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 20 }, Ankunftszeit: { stunde: 14, minute: 20 } } ] };
+        const a4_data = {Email: "a1@evu.de", Zugnummer: "T4", EVU: "Test4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraum3Wochen, ListeGewuenschterSlotAbschnitte: [ { von: "X", bis: "B", Abfahrtszeit: { stunde: 11, minute: 40 }, Ankunftszeit: { stunde: 12, minute: 40 } }, { von: "B", bis: "C", Abfahrtszeit: { stunde: 13, minute: 20 }, Ankunftszeit: { stunde: 14, minute: 20 } } ] };
         await request(app).post('/api/anfragen').send(a4_data);
 
         // 3. Zuordnungsprozess für die Anfragen anstoßen -> Erzeugt die Konfliktsituation
@@ -96,7 +96,9 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
             an.Status = 'validiert';
             an.save(); 
             await request(app).post(`/api/anfragen/${an._id}/zuordnen`).send();            
-        }        
+        }    
+        anfr = await Anfrage.find({});
+        //console.log(anfr);    
         
         console.log("TEST SETUP: Anfragen erstellt und Konflikte simuliert. Starte Konflikterkennung");
         // Konflikterkennung und Gruppierung
@@ -110,6 +112,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
     it('sollte für eine Konfliktgruppe die korrekten, freien Alternativ-Slots für jede Anfrage zurückgeben', async () => {
         // --- VORBEREITUNG: Finde die Gruppe für den Konflikt mit allen 4 Anfragen auf Abschnitt X-B ---
         let anfragenIdsFuerGruppe = await Anfrage.find({});
+        console.log(anfragenIdsFuerGruppe);
         anfragenIdsFuerGruppe = anfragenIdsFuerGruppe.map(a => a._id.toString()).sort();
         let kapatopf_xb_maxkapa = await Kapazitaetstopf.findOne({Abschnitt: "X-B"});
         kapatopf_xb_maxkapa = kapatopf_xb_maxkapa.maxKapazitaet;

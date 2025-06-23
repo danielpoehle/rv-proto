@@ -1668,14 +1668,30 @@ exports.getKonfliktGruppeById = async (req, res) => {
     }
     try {
         const gruppe = await KonfliktGruppe.findById(gruppenId)
-            .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Verkehrsart Status Entgelt Email')
+            // Populate der Anfragen für die Gruppe
+            .populate({
+                path: 'beteiligteAnfragen',
+                select: 'AnfrageID_Sprechend EVU Verkehrsart Entgelt Status Email ZugewieseneSlots', // Wichtig: 'ZugewieseneSlots' mitladen
+                // NESTED POPULATE: Innerhalb der Anfragen die Slots laden
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf' // Wichtig: Den Verweis zum Topf mitladen
+                }
+            })
+            // Populate der Einzelkonflikte für die Gruppe
             .populate({
                 path: 'konflikteInGruppe',
-                select: 'ausloesenderKapazitaetstopf',
-                populate: {
-                    path: 'ausloesenderKapazitaetstopf',
-                    select: 'TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet'
-                }
+                populate: [
+                    { path: 'ausloesenderKapazitaetstopf', 
+                        select: '_id TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet' 
+                    }, // Wichtig: ID des Topfes
+                    {
+                        path: 'ReihungEntgelt.anfrage',
+                        model: 'Anfrage',
+                        select: 'AnfrageID_Sprechend EVU'
+                    }
+                ]
             });
 
         if (!gruppe) {
