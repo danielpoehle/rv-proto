@@ -267,81 +267,64 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
         konflikt.abgelehnteAnfragenEntgeltvergleich = [];
         konflikt.abgelehnteAnfragenHoechstpreis = []; // Sicherstellen, dass dies auch leer ist für diese Phase
         
+        let anfragenFuerHoechstpreis = []; // Sammelt Anfrage-IDs für den Fall eines Gleichstands  
+
+        // Verarbeite die Reihung in Blöcken von gleichem Entgelt
+        let verarbeiteteAnfragenIndex = 0;
+        while (verarbeiteteAnfragenIndex < konflikt.ReihungEntgelt.length) {
+            const aktuellesEntgelt = konflikt.ReihungEntgelt[verarbeiteteAnfragenIndex].entgelt;
             
-        let aktuelleKapazitaetBelegt = 0;
-        let anfragenFuerHoechstpreis = []; // Sammelt Anfrage-IDs für den Fall eines Gleichstands
-        let letztesAkzeptiertesEntgelt = null;
-        let entgeltGleichstand = 0;
+            // Finde alle Anfragen mit diesem Entgelt (der aktuelle "Block")
+            const blockMitGleichemEntgelt = konflikt.ReihungEntgelt.filter(
+                r => r.entgelt === aktuellesEntgelt
+            );
+            
+            const anzahlKandidatenImBlock = blockMitGleichemEntgelt.length;
+            const anzahlBisherZugewiesen = konflikt.zugewieseneAnfragen.length;
+            const anzahlVerbleibendePlaetze = maxKap - anzahlBisherZugewiesen;
 
-
-        
-
-        for (const gereihteAnfrageItem of konflikt.ReihungEntgelt) {
-            const anfrageId = gereihteAnfrageItem.anfrage; // Ist bereits ObjectId
-            const anfrageEntgelt = gereihteAnfrageItem.entgelt;
-
-            if (aktuelleKapazitaetBelegt < maxKap) {              
-
-                // Dieser Block prüft, ob die aktuelle Anfrage noch in die Kapazität passt.
-                // Und ob es einen Gleichstand mit der nächsten gibt, falls dieser die Kapazität sprengen würde.
-                let istGleichstandAnGrenze = false;
-                const anzahlNochZuVergebenderPlaetze = maxKap - aktuelleKapazitaetBelegt;
-                const anzahlKandidatenMitDiesemEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt === anfrageEntgelt && !aktiveAnfragenFuerEntgeltvergleich.find(a => a._id.equals(r.anfrage) && (anfragenIdsMitVerzicht.has(a._id.toString()) || anfragenIdsMitVerschub.has(a._id.toString()))) ).length;
-
-
-                if (anzahlKandidatenMitDiesemEntgelt > anzahlNochZuVergebenderPlaetze && anfrageEntgelt === gereihteAnfrageItem.entgelt) {
-                     // Mehr Kandidaten mit diesem Entgelt als freie Plätze -> Alle mit diesem Entgelt gehen in Höchstpreis
-                    istGleichstandAnGrenze = true;
-                    entgeltGleichstand = anfrageEntgelt;
-                }
-
-                if (istGleichstandAnGrenze) {
-                    konflikt.ReihungEntgelt.filter(r => r.entgelt === anfrageEntgelt).forEach(rAnfrage => {
-                         if (!anfragenFuerHoechstpreis.some(id => id.equals(rAnfrage.anfrage))) {
-                            anfragenFuerHoechstpreis.push(rAnfrage.anfrage);
-                        }
-                    });
-                    // Da alle mit diesem Entgelt in HP gehen, werden hier keine weiteren Plätze belegt
-                    // und wir können die Schleife für dieses Entgelt-Niveau beenden bzw. die nächsten nur noch ablehnen.
-                    // Also: wir brechen hier nicht ab, sondern lassen die untere Logik die Ablehnung machen
-
-                } else { //max Kapazität noch nicht erreicht
-                    if(anfrageEntgelt >= entgeltGleichstand) { //freier Platz wird belegt
-                        konflikt.zugewieseneAnfragen.push(anfrageId);
-                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
-                        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
-                        aktuelleKapazitaetBelegt++;
-                        letztesAkzeptiertesEntgelt = anfrageEntgelt; // Merke dir das Entgelt des letzten, der reingepasst hat
-                    }else { // Sonderfall: letzte Plätze sind nur deswegen noch frei weil vorher Anfragen 
-                            // ins Höchstpreisverfahren gegangen sind und um diese freien Plätze konkurrieren
-                            // Die Anfragen mit geringerem Entgelt werden dann abgelehnt
-                        konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageId);
-                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
-                        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
-                    }
-                    
-                }
-            } else { // Kapazität ist voll
-                // Ist diese Anfrage Teil eines Gleichstands mit dem letzten akzeptierten?
-                if (anfrageEntgelt === letztesAkzeptiertesEntgelt && !anfragenFuerHoechstpreis.some(id => id.equals(anfrageId))) {
-                    // Ja, diese Anfrage gehört auch zu den Gleichstandskandidaten
-                    anfragenFuerHoechstpreis.push(anfrageId);
-                } else if (!anfragenFuerHoechstpreis.some(id => id.equals(anfrageId))) { 
-                    // Nein, eindeutig zu niedriges Entgelt oder nicht Teil des Gleichstands -> Ablehnung
-                    konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageId);
-                    let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+            if (anzahlKandidatenImBlock <= anzahlVerbleibendePlaetze) {
+                // **Fall 1: Der gesamte Block passt noch in die Kapazität.**
+                // Alle Anfragen in diesem Block werden zugewiesen.
+                for (const anfrageItem of blockMitGleichemEntgelt) {
+                    konflikt.zugewieseneAnfragen.push(anfrageItem.anfrage);
+                    let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
                     if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
                 }
+            } else {
+                // **Fall 2: Der Block passt NICHT mehr komplett rein.**
+                // Nur noch `anzahlVerbleibendePlaetze` können vergeben werden.
+                if (anzahlVerbleibendePlaetze > 0) {
+                    // Unauflösbarer Gleichstand um die letzten Plätze -> Höchstpreisverfahren
+                    anfragenFuerHoechstpreis = blockMitGleichemEntgelt.map(item => item.anfrage);
+                }
+                // Alle Anfragen in diesem Block (und alle folgenden mit niedrigerem Entgelt) werden
+                // entweder Kandidaten für HP oder direkt abgelehnt.
+                // Die Schleife kann hier beendet werden, der Rest wird abgelehnt.
+                for (const anfrageItem of blockMitGleichemEntgelt) {
+                    if (!anfragenFuerHoechstpreis.some(id => id.equals(anfrageItem.anfrage))) {
+                        konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage);
+                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+                        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                    }
+                }
             }
-        } // Ende der Schleife durch ReihungEntgelt
 
-        // Entferne die Höchstpreis-Kandidaten aus den regulär Zugewiesenen, falls sie dort gelandet sind
-        if (anfragenFuerHoechstpreis.length > 0) {
-            konflikt.zugewieseneAnfragen = konflikt.zugewieseneAnfragen.filter(
-                zugewiesenId => !anfragenFuerHoechstpreis.some(hpId => hpId.equals(zugewiesenId))
-            );
-        }
-
+            // Setze den Index auf die nächste Anfrage mit einem anderen Entgelt
+            verarbeiteteAnfragenIndex += anzahlKandidatenImBlock;
+            
+            // Wenn wir im HP-Verfahren sind, werden alle restlichen Anfragen abgelehnt
+            if (anfragenFuerHoechstpreis.length > 0) {
+                const restlicheAnfragen = konflikt.ReihungEntgelt.slice(verarbeiteteAnfragenIndex);
+                for (const anfrageItem of restlicheAnfragen) {
+                    konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage);
+                    let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+                    if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                }
+                break; // Schleife beenden
+            }
+        } // Ende der while-Schleife        
+        
         // Setze finalen Status für diesen Schritt
         if (anfragenFuerHoechstpreis.length > 0) {
             konflikt.status = 'in_bearbeitung_hoechstpreis';
@@ -1137,9 +1120,9 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
 
         // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
         for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
-            console.log(`anfrageDoc vor Statusupdate ${anfrageDoc}`);
+            //console.log(`anfrageDoc vor Statusupdate ${anfrageDoc}`);
              await anfrageDoc.updateGesamtStatus();
-             console.log(`anfrageDoc nach Statusupdate ${anfrageDoc}`);
+             //console.log(`anfrageDoc nach Statusupdate ${anfrageDoc}`);
              await anfrageDoc.save();
         }
 
