@@ -936,7 +936,7 @@ describe('Konfliktgruppen-Status-Synchronisation', () => {
             expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_verzichtet');
         });
 
-        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen', async () => {
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 1', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
 
             
@@ -1089,20 +1089,15 @@ describe('Konfliktgruppen-Status-Synchronisation', () => {
             expect(loesenResponse.status).toBe(200);
             gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
             expect(gruppe).not.toBeNull();
-            console.log(gruppe);
+            
+
             //Prüfe den Status aller Anfragen
             anfrage_X = await Anfrage.findById(anfrage_X._id);
             anfrage_Y = await Anfrage.findById(anfrage_Y._id);
             anfrage_Z = await Anfrage.findById(anfrage_Z._id);
             anfrage_V = await Anfrage.findById(anfrage_V._id);
 
-            console.log(anfrage_X);
-            console.log(anfrage_Y);
-            console.log(anfrage_Z);
-            console.log(anfrage_V);
-
             expect(gruppe.status).toBe('vollstaendig_geloest');
-
             
             expect(anfrage_X.Status).toBe('teilweise_bestaetigt_topf');
             expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_marktanteil');
@@ -1113,5 +1108,516 @@ describe('Konfliktgruppen-Status-Synchronisation', () => {
             expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
             expect(anfrage_V.Status).toBe('final_abgelehnt');
             expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_entgelt');
+        });
+
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 2', async () => {
+            // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
+
+            
+            const commonSlotParams2 = {
+                von: "X", bis: "S", Abschnitt: "Nord-West",
+                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
+                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            };
+
+            for (let kw = 11; kw <= 13; kw++) {
+                
+                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
+                
+            }
+
+            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
+            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
+            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+
+            // 1. Lade die drei Kapazitätstöpfe
+            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
+            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
+            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
+            
+            // 2. Erstelle 4 Anfragen
+            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
+            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+
+
+            let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
+            let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
+            let anfrage_Z = await Anfrage.findOne({Zugnummer: "Z1"});
+            let anfrage_V = await Anfrage.findOne({Zugnummer: "V1"});
+            await request(app).post(`/api/anfragen/${anfrage_X._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Y._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Z._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_V._id}/zuordnen`).send();
+
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_X.Status = 'validiert'; anfrage_X.save();
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Y.Status = 'validiert'; anfrage_Y.save();
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_Z.Status = 'validiert'; anfrage_Z.save();
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            anfrage_V.Status = 'validiert'; anfrage_V.save();
+            
+
+            // 3. Erstelle ein Konfliktdokument pro KW und eine Gruppe, weil die maxKapa beider Töpfe gleich sind
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Finde die resultierende Gruppe in der DB. Es darf nur eine geben.
+            let anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(1);
+            let gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            expect(gruppe.status).toBe('offen');
+
+            //Prüfe den Status aller Anfragen und deren Entgelt
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            expect(anfrage_X.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_Z.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_V.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_X.Entgelt).toBe(15*120);
+            expect(anfrage_Y.Entgelt).toBe(10*120);
+            expect(anfrage_Z.Entgelt).toBe(10*120);
+            expect(anfrage_V.Entgelt).toBe(9*120);
+
+
+            // 4. Keine Anfrage vezichtet
+            let loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppe._id}/verzicht-verschub`)
+            .send({});
+
+            // Überprüfung
+            expect(loesenResponse.status).toBe(200);
+            gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            expect(gruppe.status).toBe('in_bearbeitung_entgelt');
+
+            //Prüfe den Status aller Anfragen
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            expect(anfrage_X.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_Z.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_V.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+
+            // 5. Entgeltvergleich anstoßen. Da pro EVU nur max 1 Zuweisung zulässig ist,
+            // muss das EVU 3 die Anfrage Z vor oder nach Anfrage Y priorisieren. 
+            // Weil es Anfrage Z höher als Anfrage Y priorisiert, werden X und Z zugewiesen 
+            // und V aufgrund zu niedrigem Entgelt und Y aufgrund Marktanteil abgewiesen
+            loesenResponse = await request(app)
+                .put(`/api/konflikte/gruppen/${gruppe._id}/entgeltvergleich`)
+                .send({
+                    "evuReihungen": [
+                                        {
+                                            "evu": "Inv1",
+                                            "anfrageIds": [
+                                                anfrage_X._id, // Anfrage mit höchster Priorität für Inv1
+                                            ]
+                                        },
+                                        {
+                                            "evu": "Inv3",
+                                            "anfrageIds": [
+                                                anfrage_Z._id, // Anfrage mit höchster Priorität für Inv3
+                                                anfrage_Y._id, // Platz 2 für Inv3
+                                            ]
+                                        },
+                                        {
+                                            "evu": "Inv4",
+                                            "anfrageIds": [
+                                                anfrage_V._id, // Anfrage mit höchster Priorität für Inv4
+                                            ]
+                                        },
+                                    ],
+                });
+            
+            // Überprüfung
+            expect(loesenResponse.status).toBe(200);
+            gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            
+            //Prüfe den Status aller Anfragen
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+
+            expect(gruppe.status).toBe('vollstaendig_geloest');
+            
+            expect(anfrage_X.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('final_abgelehnt');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_marktanteil');
+            expect(anfrage_Z.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
+            expect(anfrage_V.Status).toBe('final_abgelehnt');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_entgelt');
+        });
+
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 3', async () => {
+            // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
+
+            
+            const commonSlotParams2 = {
+                von: "X", bis: "S", Abschnitt: "Nord-West",
+                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
+                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            };
+
+            for (let kw = 11; kw <= 13; kw++) {
+                
+                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
+                
+            }
+
+            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
+            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
+            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+
+            // 1. Lade die drei Kapazitätstöpfe
+            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
+            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
+            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
+            
+            // 2. Erstelle 4 Anfragen
+            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
+            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ Zugnummer: "V1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+
+
+            let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
+            let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
+            let anfrage_Z = await Anfrage.findOne({Zugnummer: "Z1"});
+            let anfrage_V = await Anfrage.findOne({Zugnummer: "V1"});
+            await request(app).post(`/api/anfragen/${anfrage_X._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Y._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Z._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_V._id}/zuordnen`).send();
+
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_X.Status = 'validiert'; anfrage_X.save();
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Y.Status = 'validiert'; anfrage_Y.save();
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_Z.Status = 'validiert'; anfrage_Z.save();
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            anfrage_V.Status = 'validiert'; anfrage_V.save();
+            
+
+            // 3. Erstelle ein Konfliktdokument pro KW und eine Gruppe, weil die maxKapa beider Töpfe gleich sind
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Finde die resultierende Gruppe in der DB. Es darf nur eine geben.
+            let anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(1);
+            let gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            expect(gruppe.status).toBe('offen');
+
+            //Prüfe den Status aller Anfragen und deren Entgelt
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            expect(anfrage_X.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_Z.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_V.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_X.Entgelt).toBe(15*120);
+            expect(anfrage_Y.Entgelt).toBe(10*120);
+            expect(anfrage_Z.Entgelt).toBe(10*120);
+            expect(anfrage_V.Entgelt).toBe(9*120);
+
+
+            // 4. Keine Anfrage vezichtet
+            let loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppe._id}/verzicht-verschub`)
+            .send({});
+
+            // Überprüfung
+            expect(loesenResponse.status).toBe(200);
+            gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            expect(gruppe.status).toBe('in_bearbeitung_entgelt');
+
+            //Prüfe den Status aller Anfragen
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            expect(anfrage_X.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_Z.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_V.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+
+            // 5. Entgeltvergleich anstoßen. Da pro EVU nur max 1 Zuweisung zulässig ist,
+            // muss das EVU 1 und EVU 2 die Anfragen  priorisieren. 
+            // Weil Anfrage V höher als Anfrage X priorisiert und Anfrage Z höher als Y, 
+            // werden V und Z zugewiesen 
+            // und Y und X aufgrund Marktanteil abgewiesen
+            loesenResponse = await request(app)
+                .put(`/api/konflikte/gruppen/${gruppe._id}/entgeltvergleich`)
+                .send({
+                    "evuReihungen": [
+                                        {
+                                            "evu": "Inv1",
+                                            "anfrageIds": [
+                                                anfrage_V._id, // Anfrage mit höchster Priorität für Inv1
+                                                anfrage_X._id, // Platz 2 für Inv1
+                                            ]
+                                        },
+                                        {
+                                            "evu": "Inv2",
+                                            "anfrageIds": [
+                                                anfrage_Z._id, // Anfrage mit höchster Priorität für Inv2
+                                                anfrage_Y._id, // Platz 2 für Inv3
+                                            ]
+                                        },
+                                    ],
+                });
+            
+            // Überprüfung
+            expect(loesenResponse.status).toBe(200);
+            gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            
+            //Prüfe den Status aller Anfragen
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+
+            expect(gruppe.status).toBe('vollstaendig_geloest');
+            
+            expect(anfrage_X.Status).toBe('teilweise_bestaetigt_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_marktanteil');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('final_abgelehnt');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_marktanteil');
+            expect(anfrage_Z.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
+            expect(anfrage_V.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
+        });
+
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 4', async () => {
+            // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
+
+            
+            const commonSlotParams2 = {
+                von: "X", bis: "S", Abschnitt: "Nord-West",
+                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
+                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            };
+
+            for (let kw = 11; kw <= 13; kw++) {
+                
+                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
+                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
+                
+            }
+
+            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
+            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
+            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+
+            // 1. Lade die drei Kapazitätstöpfe
+            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
+            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
+            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
+            
+            // 2. Erstelle 4 Anfragen
+            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
+            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
+            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+
+
+            let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
+            let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
+            let anfrage_Z = await Anfrage.findOne({Zugnummer: "Z1"});
+            let anfrage_V = await Anfrage.findOne({Zugnummer: "V1"});
+            await request(app).post(`/api/anfragen/${anfrage_X._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Y._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_Z._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_V._id}/zuordnen`).send();
+
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_X.Status = 'validiert'; anfrage_X.save();
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Y.Status = 'validiert'; anfrage_Y.save();
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_Z.Status = 'validiert'; anfrage_Z.save();
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            anfrage_V.Status = 'validiert'; anfrage_V.save();
+            
+
+            // 3. Erstelle ein Konfliktdokument pro KW und eine Gruppe, weil die maxKapa beider Töpfe gleich sind
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Finde die resultierende Gruppe in der DB. Es darf nur eine geben.
+            let anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(1);
+            let gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            expect(gruppe.status).toBe('offen');
+
+            //Prüfe den Status aller Anfragen und deren Entgelt
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            expect(anfrage_X.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_Z.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_V.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage_X.Entgelt).toBe(15*120);
+            expect(anfrage_Y.Entgelt).toBe(10*120);
+            expect(anfrage_Z.Entgelt).toBe(10*120);
+            expect(anfrage_V.Entgelt).toBe(9*120);
+
+
+            // 4. Keine Anfrage vezichtet
+            let loesenResponse = await request(app)
+            .put(`/api/konflikte/gruppen/${gruppe._id}/verzicht-verschub`)
+            .send({});
+
+            // Überprüfung
+            expect(loesenResponse.status).toBe(200);
+            gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            expect(gruppe.status).toBe('in_bearbeitung_entgelt');
+
+            //Prüfe den Status aller Anfragen
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+            expect(anfrage_X.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_Z.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+            expect(anfrage_V.Status).toBe('in_konfliktloesung_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_entgeltentscheidung_topf');
+
+            // 5. Entgeltvergleich anstoßen. Da pro EVU nur max 1 Zuweisung zulässig ist,
+            // muss das EVU 1 seine 3 Anfragen  priorisieren. 
+            // Weil Anfrage Z höher als Anfrage X und Y priorisiert wird, 
+            // werden V und Z zugewiesen 
+            // und Y und X aufgrund Marktanteil abgewiesen
+            loesenResponse = await request(app)
+                .put(`/api/konflikte/gruppen/${gruppe._id}/entgeltvergleich`)
+                .send({
+                    "evuReihungen": [
+                                        {
+                                            "evu": "Inv1",
+                                            "anfrageIds": [
+                                                anfrage_Z._id, // Anfrage mit höchster Priorität für Inv1
+                                                anfrage_X._id, // Platz 2 für Inv1
+                                                anfrage_Y._id, // Platz 3 für Inv1
+                                            ]
+                                        },
+                                        {
+                                            "evu": "Inv4",
+                                            "anfrageIds": [
+                                                anfrage_V._id, // Anfrage mit höchster Priorität für Inv4
+                                            ]
+                                        },
+                                    ],
+                });
+            
+            // Überprüfung
+            expect(loesenResponse.status).toBe(200);
+            gruppe = await KonfliktGruppe.findOne({ beteiligteAnfragen: anfrage_X._id });
+            expect(gruppe).not.toBeNull();
+            
+            //Prüfe den Status aller Anfragen
+            anfrage_X = await Anfrage.findById(anfrage_X._id);
+            anfrage_Y = await Anfrage.findById(anfrage_Y._id);
+            anfrage_Z = await Anfrage.findById(anfrage_Z._id);
+            anfrage_V = await Anfrage.findById(anfrage_V._id);
+
+            expect(gruppe.status).toBe('vollstaendig_geloest');
+            
+            expect(anfrage_X.Status).toBe('teilweise_bestaetigt_topf');
+            expect(anfrage_X.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_marktanteil');
+            expect(anfrage_X.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_Y.Status).toBe('final_abgelehnt');
+            expect(anfrage_Y.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_marktanteil');
+            expect(anfrage_Z.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_Z.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
+            expect(anfrage_V.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
         });
     });
