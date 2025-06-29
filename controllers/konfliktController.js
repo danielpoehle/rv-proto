@@ -581,7 +581,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                         console.log(`Konfliktdokument ${konfliktDoku._id} für Topf ${topf.TopfID}: Beteiligte Anfragen sind identisch. Status (${konfliktDoku.status}) bleibt erhalten.`);
                         unveraenderteBestehendeKonflikte.push(konfliktDoku);
                     }
-                } else { // Topf ist überbuht aber es gibt noch keine Konfliktdoku --> neu initial anlegen
+                } else { // Topf ist überbucht aber es gibt noch keine Konfliktdoku --> neu initial anlegen
                     const neuesKonfliktDoku = new KonfliktDokumentation({
                         beteiligteAnfragen: aktuelleAnfragenAmTopfIds,
                         ausloesenderKapazitaetstopf: topf._id,

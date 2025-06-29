@@ -1300,8 +1300,9 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
 
         // Erzeuge im Test den exakten Schlüssel, den wir erwarten
         let erwarteteAnfrageIds = anfragenFuerKonflikt.map(a => a._id.toString()).sort();
+        let maxEVUkapa = Math.floor(0.56 * kt_0507.ListeDerSlots.length);
         //console.log(erwarteteAnfrageIds);        
-        let erwarteterGruppenSchluessel = `${kt_0507.maxKapazitaet}|${erwarteteAnfrageIds.join('#')}`;
+        let erwarteterGruppenSchluessel = `${kt_0507.maxKapazitaet}#${maxEVUkapa}|${erwarteteAnfrageIds.join('#')}`;
 
         //console.log(`Erwarteter Schlüssel Gruppe 1: ${erwarteterGruppenSchluessel}`);
 
@@ -1312,7 +1313,8 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         expect(konfliktGruppe).not.toBeNull();
 
         erwarteteAnfrageIds = anfragenFuerBelegung.map(a => a._id.toString()).sort();
-        erwarteterGruppenSchluessel = `${kt_0507.maxKapazitaet}|${erwarteteAnfrageIds.join('#')}`;
+        maxEVUkapa = Math.floor(0.56 * kt_0507.ListeDerSlots.length);
+        erwarteterGruppenSchluessel = `${kt_0507.maxKapazitaet}#${maxEVUkapa}|${erwarteteAnfrageIds.join('#')}`;
 
         //console.log(`Erwarteter Schlüssel Gruppe 2: ${erwarteterGruppenSchluessel}`);
 

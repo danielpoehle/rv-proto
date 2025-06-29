@@ -115,8 +115,10 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         console.log(anfragenIdsFuerGruppe);
         anfragenIdsFuerGruppe = anfragenIdsFuerGruppe.map(a => a._id.toString()).sort();
         let kapatopf_xb_maxkapa = await Kapazitaetstopf.findOne({Abschnitt: "X-B"});
+        let maxEVUanteil = Math.floor(0.56 * kapatopf_xb_maxkapa.ListeDerSlots.length);
         kapatopf_xb_maxkapa = kapatopf_xb_maxkapa.maxKapazitaet;
-        const gruppenSchluessel = `${kapatopf_xb_maxkapa}|${anfragenIdsFuerGruppe.join('#')}`;
+
+        const gruppenSchluessel = `${kapatopf_xb_maxkapa}#${maxEVUanteil}|${anfragenIdsFuerGruppe.join('#')}`;
         console.log(gruppenSchluessel);
         const konfliktGruppe = await KonfliktGruppe.findOne({ gruppenSchluessel: gruppenSchluessel });
         expect(konfliktGruppe).not.toBeNull();
