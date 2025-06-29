@@ -1745,7 +1745,7 @@ exports.getKonfliktGruppeById = async (req, res) => {
                 path: 'konflikteInGruppe',
                 populate: [
                     { path: 'ausloesenderKapazitaetstopf', 
-                        select: '_id TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet' 
+                        select: '_id TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet ListeDerSlots' 
                     }, // Wichtig: ID des Topfes
                     {
                         path: 'ReihungEntgelt.anfrage',
