@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 const KonfliktDokumentation = require('../models/KonfliktDokumentation');
 const KonfliktGruppe = require('../models/KonfliktGruppe');
 
+// Hilfsfunktion zum Formatieren der Zeit für die ID
+function formatTimeForID(stunde, minute) {
+    return `${String(stunde).padStart(2, '0')}${String(minute).padStart(2, '0')}`;
+}
 
 /**
  * Ermittelt den Gesamtstatus einer Konfliktgruppe basierend auf den Status ihrer Einzelkonflikte.
@@ -51,8 +55,9 @@ async function aktualisiereKonfliktGruppen() {
     try {
         // 1. Lade ALLE Konfliktdokumente, um den gesamten "Soll-Zustand" zu erfassen.
         const relevanteKonflikte = await KonfliktDokumentation.find({})
-            .select('beteiligteAnfragen status ausloesenderKapazitaetstopf')
-            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet ListeDerSlots'); // Lade maxKapazitaet mit
+            .select('beteiligteAnfragen status ausloesenderKapazitaetstopf ausloesenderSlot konfliktTyp')
+            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet ListeDerSlots') // Lade Infos des Topfs für gruppenschluessel
+            .populate('ausloesenderSlot', 'Linienbezeichnung von bis Abfahrt Verkehrsart'); // Lade Infos des Slots für gruppenschluessel
 
 
 
@@ -62,11 +67,20 @@ async function aktualisiereKonfliktGruppen() {
         for (const konflikt of relevanteKonflikte) {
             if (!konflikt.beteiligteAnfragen || konflikt.beteiligteAnfragen.length === 0) continue;
             
+            let gruppenSchluessel = '';
             const anfrageIdsStrings = konflikt.beteiligteAnfragen.map(a => a.toString()).sort();
-            const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
-            const evuMarktanteilLimit = Math.floor(0.56 * konflikt.ausloesenderKapazitaetstopf.ListeDerSlots.length);
-            // Schlüssel: "maxKap#evuMarktanteilLimit|anfrageId1#anfrageId2#..."
-            const gruppenSchluessel = `${maxKap}#${evuMarktanteilLimit}|${anfrageIdsStrings.join('#')}`;          
+            if(konflikt.konfliktTyp === 'KAPAZITAETSTOPF'){
+                const maxKap = konflikt.ausloesenderKapazitaetstopf.maxKapazitaet;
+                const evuMarktanteilLimit = Math.floor(0.56 * konflikt.ausloesenderKapazitaetstopf.ListeDerSlots.length);
+                // Schlüssel: "maxKap#evuMarktanteilLimit|anfrageId1#anfrageId2#..."
+                gruppenSchluessel = `${maxKap}#${evuMarktanteilLimit}|${anfrageIdsStrings.join('#')}`;  
+            }
+            if(konflikt.konfliktTyp === 'SLOT'){
+                const prefix = `${konflikt.ausloesenderSlot.Linienbezeichnung}#${konflikt.ausloesenderSlot.von}#${konflikt.ausloesenderSlot.bis}#${formatTimeForID(konflikt.ausloesenderSlot.Abfahrt.stunde, konflikt.ausloesenderSlot.Abfahrt.minute)}#${konflikt.ausloesenderSlot.Verkehrsart}`;
+                // Schlüssel: "Linie#von#bis#Abfahrt(HHMM)#Verkehrsart|anfrageId1#anfrageId2#..."
+                gruppenSchluessel = `${prefix}|${anfrageIdsStrings.join('#')}`;
+            }
+                    
             
             if (!gruppenMap.has(gruppenSchluessel)) {
                 gruppenMap.set(gruppenSchluessel, {

@@ -134,7 +134,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             
         });
 
-        it('sollte einen neuen Konflikt korrekt identifizieren und den Status zugewiesenen Slots ohne Konflikt korrekt setzen', async () => {
+        it('sollte einen neuen Topf-Konflikt korrekt identifizieren und den Status zugewiesenen Slots ohne Konflikt korrekt setzen', async () => {
             // Aktion: Konflikterkennung anstoßen
             const response = await request(app)
                 .post('/api/konflikte/identifiziere-topf-konflikte')
@@ -147,6 +147,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
             expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
             expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+            expect(response.body.toepfeOhneKonflikt).toHaveLength(2);
 
             // Anfrage C5 hat überhaupt keinen Konflikt, ist allein im Topf kt_NoConflict2 (1 <= max Kap 2)
             let anfrage5 = await Anfrage.findOne({Zugnummer: `C5`});
@@ -158,7 +159,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             expect(kt_NoConflict2.ListeDerAnfragen[0]._id.toString()).toBe(anfrage5._id.toString());
         });
 
-        it('sollte einen neuen Konflikt korrekt identifizieren und ein Konfliktdokument erstellen', async () => {
+        it('sollte einen neuen Topf-Konflikt korrekt identifizieren und ein Konfliktdokument erstellen', async () => {
             // Aktion: Konflikterkennung anstoßen
             const response = await request(app)
                 .post('/api/konflikte/identifiziere-topf-konflikte')
@@ -211,7 +212,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             // ... etc. für andere leere Listen
         });
 
-        it('sollte ein existierendes offenes Konfliktdokument nicht neu erstellen, wenn sich die Anfragen nicht geändert haben', async () => {
+        it('sollte ein existierendes offenes Topf-Konfliktdokument nicht neu erstellen, wenn sich die Anfragen nicht geändert haben', async () => {
             // 1. Erste Konflikterkennung (erstellt das Dokument)
             await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
             let anzahlKonfliktDokus = await KonfliktDokumentation.countDocuments();
@@ -240,7 +241,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             // notizen könnten sich durch den zweiten Lauf geändert haben, falls wir das implementieren
         });
 
-        it('sollte einen gelösten Konflikt zurücksetzen und wieder öffnen, wenn neue Anfragen hinzukommen und den Konflikt verändern', async () => {
+        it('sollte einen gelösten Topf-Konflikt zurücksetzen und wieder öffnen, wenn neue Anfragen hinzukommen und den Konflikt verändern', async () => {
             // A. Initialen Konflikt erzeugen und lösen (simuliert)
             // 1. Konflikt identifizieren (erzeugt KonfliktDoku K1)
             const identResponse1 = await request(app).post('/api/konflikte/identifiziere-topf-konflikte').send();
@@ -287,6 +288,30 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             const tatsaechlicheBeteiligteIds = konfliktDoku_final.beteiligteAnfragen.map(id => id.toString());
             expect(tatsaechlicheBeteiligteIds.sort()).toEqual(erwarteteBeteiligteIds.sort());
             expect(tatsaechlicheBeteiligteIds).toHaveLength(5);
+
+            let anf1 = await Anfrage.findById(erwarteteBeteiligteIds[0]);
+            let anf2 = await Anfrage.findById(erwarteteBeteiligteIds[1]);
+            let anf3 = await Anfrage.findById(erwarteteBeteiligteIds[2]);
+            let anf4 = await Anfrage.findById(erwarteteBeteiligteIds[3]);
+            let anf5 = await Anfrage.findById(erwarteteBeteiligteIds[4]);
+
+            //console.log(anf1);
+
+            expect(anf1.ZugewieseneSlots).not.toBeNull();
+            expect(anf1.ZugewieseneSlots).toHaveLength(1);
+            expect(anf1.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf2.ZugewieseneSlots).not.toBeNull();
+            expect(anf2.ZugewieseneSlots).toHaveLength(1);
+            expect(anf2.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf3.ZugewieseneSlots).not.toBeNull();
+            expect(anf3.ZugewieseneSlots).toHaveLength(1);
+            expect(anf3.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf4.ZugewieseneSlots).not.toBeNull();
+            expect(anf4.ZugewieseneSlots).toHaveLength(2);
+            expect(anf4.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf5.ZugewieseneSlots).not.toBeNull();
+            expect(anf5.ZugewieseneSlots).toHaveLength(1);
+            expect(anf5.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
 
             // Resolution-Felder sollten zurückgesetzt sein
             expect(konfliktDoku_final.zugewieseneAnfragen).toEqual([]);
@@ -603,6 +628,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // Konfliktdokument erstellen (simuliert /api/konflikte/identifiziere-topf-konflikte)
             konfliktDoku = await new KonfliktDokumentation({
+                konfliktTyp: 'KAPAZITAETSTOPF',
                 beteiligteAnfragen: [anfrageHoch._id, anfrageMittel._id, anfrageNiedrig._id],
                 ausloesenderKapazitaetstopf: kt_EntgeltTest._id,
                 status: 'offen' // Startet als 'offen'
@@ -1385,4 +1411,330 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         // Prüfe den Nachfolger (kt_1113) //der ist nicht existent
         expect(topfAnalyse.nachfolger).toBeNull();
     });
+});
+
+describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
+        let kt_DetectConflict, kt_NoConflict, kt_NoConflict2;
+        let anfragenIds = [];
+        let s1 = '';
+
+        // Wenn du manuelle Bereinigung pro Testfall brauchst:
+        beforeAll(async () => {
+            // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
+            // Diese Verbindung muss die URI zur Docker-DB nutzen
+            await mongoose.connect(process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots');
+        });
+    
+        afterAll(async () => {
+            await mongoose.disconnect();
+        });
+
+        beforeEach(async () => {
+
+            if (mongoose.connection.readyState === 0) {
+                const testDbUri = process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots';
+                await mongoose.connect(testDbUri);
+            }
+            // Leere Collections
+            const collections = mongoose.connection.collections;
+            for (const key in collections) {
+                const collection = collections[key];
+                await collection.deleteMany({});
+            }
+
+            // Vorbereitung: Kapazitätstopf mit maxKapazitaet = 2 erstellen
+            const topfKriterien = {
+                Abschnitt: "KonfliktZone1", Kalenderwoche: 2, Verkehrstag: "Sa+So",
+                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
+            };
+            const topfKriterien2 = {
+                Abschnitt: "KonfliktZone2", Kalenderwoche: 2, Verkehrstag: "Sa+So",
+                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 15 // Ergibt ZF "13-15"
+            };
+            const topfKriterien3 = {
+                Abschnitt: "KonfliktZone3", Kalenderwoche: 2, Verkehrstag: "Sa+So",
+                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
+            };
+            // 3 Slots für KonfliktZone1 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
+            const slotBasis = { von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+                                Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, 
+                                Verkehrsart: topfKriterien.Verkehrsart,
+                                Grundentgelt: 150 
+                            };
+            s1 = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
+            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
+            
+            // 2 Slots für KonfliktZone2 erstellen, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
+            const slotBasis2 = { von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
+                                Verkehrstag: topfKriterien2.Verkehrstag, Kalenderwoche: topfKriterien2.Kalenderwoche, 
+                                Verkehrsart: topfKriterien2.Verkehrsart,
+                                Grundentgelt: 250 
+                            };
+            const s2 = await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 10 } });
+            await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+
+            // 3 Slots für KonfliktZone3 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
+            const slotBasis3 = { von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+                                Verkehrstag: topfKriterien3.Verkehrstag, Kalenderwoche: topfKriterien3.Kalenderwoche, 
+                                Verkehrsart: topfKriterien3.Verkehrsart,
+                                Grundentgelt: 50 
+                            };
+            const s3 = await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 10 } });
+            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 30 } });
+            
+            
+            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            expect(kt_DetectConflict.maxKapazitaet).toBe(2);
+
+            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
+            expect(kt_NoConflict.maxKapazitaet).toBe(1);
+
+            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
+            expect(kt_NoConflict2.maxKapazitaet).toBe(2);
+
+            // 2 Anfragen erstellen für KonfliktZone1 und KonfliktZone2
+            const anfrageBasis = { Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
+            const anfrageBasis2 = { EVU: "ConflictEVU4", Email: "conflict@evu2.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
+            const anfragePromises = [];
+            
+            anfragePromises.push(new Anfrage({ ...anfrageBasis, EVU: `ConflictEVU1` , Zugnummer: `C1`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+            anfragePromises.push(new Anfrage({ ...anfrageBasis2, Zugnummer: `C4`, 
+                                               ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}},
+                                                                                 {von: "Z", bis:"AA", Abfahrtszeit: {stunde:15, minute:10 }, Ankunftszeit:{stunde:16,minute:0}}
+                                               ] }).save());
+            const erstellteAnfragen = await Promise.all(anfragePromises);
+            anfragenIds = erstellteAnfragen.map(a => a._id);  
+            
+            // 1 Anfrage erstellen für KonfliktZone3
+            let anfrage_A = await new Anfrage({ ...anfrageBasis2, EVU: "ConflictEVU5" , Zugnummer: "C5", 
+                                            ListeGewuenschterSlotAbschnitte: [{von: "V", bis:"W", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}]
+                                        }).save();
+
+            // 3. Zuordnungsprozess für die Anfragen anstoßen -> Erzeugt die Konfliktsituation
+            await request(app).post(`/api/anfragen/${anfragenIds[0]._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfragenIds[1]._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_A._id}/zuordnen`).send();
+            
+            //console.log(anfrage4);
+
+            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(2); // keine Topf-Überbuchung (2 <= maxKap 2), aber ein Slot-Konflikt
+
+            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
+            expect(kt_NoConflict.ListeDerAnfragen).toHaveLength(1); // keine Topf-Überbuchung (1 <= max Kap 1)
+
+            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
+            expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1); // keine Topf-Überbuchung (1 <= max Kap 2)
+
+            // Anfragen dem Kapazitätstopf zuordnen (manuell für diesen Test)
+            //kt_DetectConflict.ListeDerAnfragen = anfragenIds;
+            //await kt_DetectConflict.save();
+
+            // Aktion: Konflikterkennung Töpfe anstoßen
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+
+            expect(response.status).toBe(200);
+            expect(response.body.message).toBe('Konfliktdetektion für Kapazitätstöpfe abgeschlossen.');
+            expect(response.body.neuErstellteKonflikte).toHaveLength(0);
+            expect(response.body.toepfeOhneKonflikt).toHaveLength(3);
+
+            kt_NoConflict2 = await Kapazitaetstopf.findById(kt_NoConflict2._id);
+            let anfrage5 = await Anfrage.findOne({Zugnummer: `C5`});
+            expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1);
+            expect(kt_NoConflict2.ListeDerAnfragen[0]._id.toString()).toBe(anfrage5._id.toString());
+            
+        });
+
+        it('sollte einen neuen Slot-Konflikt korrekt identifizieren und den Status zugewiesenen Slots ohne Konflikt korrekt setzen', async () => {
+            // Aktion: Konflikterkennung anstoßen
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-slot-konflikte')
+                .send();
+
+            // Überprüfung der Antwort
+            expect(response.status).toBe(200);
+            expect(response.body.message).toBe('Konfliktdetektion für Slots abgeschlossen.');
+            expect(response.body.neuErstellteKonflikte).toHaveLength(1);
+            expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
+            expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
+            expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+            expect(response.body.slotsOhneKonflikt).toHaveLength(7);
+
+            // Anfrage C5 hat überhaupt keinen Konflikt, ist allein im Topf kt_NoConflict2 (1 <= max Kap 2)
+            // Sie hat auch keinen Slot-Konflikt und kann daher final bestätigt werden.
+            let anfrage5 = await Anfrage.findOne({Zugnummer: `C5`});
+            //console.log(anfrage5);
+            expect(anfrage5.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage5.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+            
+        });
+
+        it('sollte einen neuen Slot-Konflikt korrekt identifizieren und ein Konfliktdokument erstellen', async () => {
+            // Aktion: Konflikterkennung anstoßen
+            const response = await request(app)
+                .post('/api/konflikte/identifiziere-slot-konflikte')
+                .send();
+
+            // Überprüfung der Antwort
+            expect(response.status).toBe(200);
+            expect(response.body.message).toBe('Konfliktdetektion für Slots abgeschlossen.');
+            expect(response.body.neuErstellteKonflikte).toHaveLength(1);
+            expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
+            expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
+            expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+            expect(response.body.slotsOhneKonflikt).toHaveLength(7);
+
+            const konfliktDokuId = response.body.neuErstellteKonflikte[0].id;
+
+            // Überprüfung des erstellten Konfliktdokuments in der DB
+            const konfliktDokuDB = await KonfliktDokumentation.findById(konfliktDokuId);
+            
+            s1 = await Slot.findById(s1.body.data._id);            
+            //console.log(s1);
+            expect(konfliktDokuDB).not.toBeNull();
+            expect(konfliktDokuDB.ausloesenderSlot.toString()).toBe(s1._id.toString());
+            expect(konfliktDokuDB.status).toBe('offen');
+            
+            // Überprüfe beteiligteAnfragen (Reihenfolge nicht garantiert, daher Set-Vergleich oder Ähnliches)
+            const beteiligteAnfragenStringsDB = konfliktDokuDB.beteiligteAnfragen.map(id => id.toString());
+            const erwarteteAnfragenStrings = anfragenIds.map(id => id.toString());
+            expect(beteiligteAnfragenStringsDB.sort()).toEqual(erwarteteAnfragenStrings.sort());
+            expect(beteiligteAnfragenStringsDB).toHaveLength(2);
+
+            //Prüfe Status der Anfragen im Konflikt
+            let beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[0]);
+            let anfrage4 = await Anfrage.findOne({Zugnummer: `C4`});
+            //console.log(anfrage4);
+            expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_slot');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');
+            beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[1]);
+            expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_slot');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');          
+            expect(anfrage4.Status).toBe('in_konfliktloesung_slot');
+            expect(anfrage4.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');
+            expect(anfrage4.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            
+
+            expect(konfliktDokuDB.zugewieseneAnfragen).toEqual([]);
+            expect(konfliktDokuDB.abgelehnteAnfragenEntgeltvergleich).toEqual([]);
+            // ... etc. für andere leere Listen
+        });
+
+        it('sollte ein existierendes offenes Slot-Konfliktdokument nicht neu erstellen, wenn sich die Anfragen nicht geändert haben', async () => {
+            // 1. Erste Konflikterkennung (erstellt das Dokument)
+            await request(app).post('/api/konflikte/identifiziere-slot-konflikte').send();
+            let anzahlKonfliktDokus = await KonfliktDokumentation.countDocuments();
+            expect(anzahlKonfliktDokus).toBe(1);
+            const ersteKonfliktDoku = await KonfliktDokumentation.findOne({ ausloesenderSlot: s1.body.data._id });
+            expect(ersteKonfliktDoku).not.toBeNull();
+
+            // 2. Aktion: Konflikterkennung erneut anstoßen, ohne dass sich etwas geändert hat
+            const response = await request(app).post('/api/konflikte/identifiziere-slot-konflikte').send();
+
+            // Überprüfung der Antwort
+            //console.log(response.body);
+            expect(response.status).toBe(200);
+            expect(response.body.neuErstellteKonflikte).toHaveLength(0);
+            expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0); // Da die Anfragen gleich blieben
+            expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(1);
+            expect(response.body.unveraenderteBestehendeKonflikte[0].id.toString()).toBe(ersteKonfliktDoku._id.toString());
+            expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+            expect(response.body.slotsOhneKonflikt).toHaveLength(7);
+
+
+            // Überprüfung, dass keine neue Konfliktdoku erstellt wurde
+            anzahlKonfliktDokus = await KonfliktDokumentation.countDocuments();
+            expect(anzahlKonfliktDokus).toBe(1); // Immer noch nur eine
+
+            const konfliktDokuDB_nachZweitemLauf = await KonfliktDokumentation.findById(ersteKonfliktDoku._id);
+            expect(konfliktDokuDB_nachZweitemLauf.status).toBe('offen'); // Sollte offen geblieben sein
+            // notizen könnten sich durch den zweiten Lauf geändert haben, falls wir das implementieren
+        });
+
+        it('sollte einen gelösten Topf-Konflikt zurücksetzen und wieder öffnen, wenn neue Anfragen hinzukommen und den Konflikt verändern', async () => {
+            // A. Initialen Konflikt erzeugen und lösen (simuliert)
+            // 1. Konflikt identifizieren (erzeugt KonfliktDoku K1)
+            const identResponse1 = await request(app).post('/api/konflikte/identifiziere-slot-konflikte').send();
+            expect(identResponse1.body.neuErstellteKonflikte).toHaveLength(1);
+            const konfliktDokuId = identResponse1.body.neuErstellteKonflikte[0].id;
+
+            // 2. Konflikt K1 lösen, indem 1 von 2 Anfragen verzichten (C4 -> anfragenIds[1])
+            const updatePayloadGeloest = {
+                ListeAnfragenMitVerzicht: [anfragenIds[1]._id.toString()]
+            };
+            const loesenResponse = await request(app)
+                .put(`/api/konflikte/slot/${konfliktDokuId}/verzicht-verschub`)
+                .send(updatePayloadGeloest);
+            //console.log(loesenResponse);
+            expect(loesenResponse.status).toBe(200);
+            expect(loesenResponse.body.data.status).toBe('geloest');
+            expect(loesenResponse.body.data.zugewieseneAnfragen).toHaveLength(1); // C1 sollte zugewiesen sein
+
+            // B. Neue Situation schaffen: Eine weitere Anfrage kommt hinzu
+            anfrageNeu = await new Anfrage({ EVU: "ReopenEVU", Zugnummer: "R5", Status: 'validiert',
+                Email: "reopen@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", 
+                Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Entgelt: 200,
+                ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10}, Ankunftszeit:{stunde:14,minute:0}}] }).save();
+            //console.log(anfrageNeu);
+
+            await request(app).post(`/api/anfragen/${anfrageNeu._id}/zuordnen`).send();            
+
+            // C. Aktion: Konflikterkennung erneut anstoßen
+            const identResponse2 = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            expect(identResponse2.status).toBe(200);
+            expect(identResponse2.body.neuErstellteKonflikte).toHaveLength(0); 
+
+            const identResponse3 = await request(app)
+                .post('/api/konflikte/identifiziere-slot-konflikte')
+                .send();
+
+            // D. Überprüfung
+            expect(identResponse3.status).toBe(200);
+            expect(identResponse3.body.neuErstellteKonflikte).toHaveLength(0); // Kein neuer Konflikt sollte erstellt werden
+            expect(identResponse3.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(1); // Der bestehende sollte aktualisiert/geöffnet werden
+            expect(identResponse3.body.aktualisierteUndGeoeffneteKonflikte[0].id.toString()).toBe(konfliktDokuId.toString());
+
+            const konfliktDoku_final = await KonfliktDokumentation.findById(konfliktDokuId);
+            expect(konfliktDoku_final).not.toBeNull();
+            expect(konfliktDoku_final.status).toBe('offen'); // Zurück auf 'offen'
+            
+            // beteiligteAnfragen sollte jetzt alle 3 Anfragen enthalten
+            const erwarteteBeteiligteIds = [...anfragenIds.map(a => a._id.toString()), anfrageNeu._id.toString()];
+            const tatsaechlicheBeteiligteIds = konfliktDoku_final.beteiligteAnfragen.map(id => id.toString());
+            expect(tatsaechlicheBeteiligteIds.sort()).toEqual(erwarteteBeteiligteIds.sort());
+            expect(tatsaechlicheBeteiligteIds).toHaveLength(3);
+
+            let anf1 = await Anfrage.findById(erwarteteBeteiligteIds[0]);
+            let anf2 = await Anfrage.findById(erwarteteBeteiligteIds[1]);
+            let anf3 = await Anfrage.findById(erwarteteBeteiligteIds[2]);
+
+            //console.log(anf1);
+
+            expect(anf1.ZugewieseneSlots).not.toBeNull();
+            expect(anf1.ZugewieseneSlots).toHaveLength(1);
+            expect(anf1.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_slot');
+
+            expect(anf2.ZugewieseneSlots).not.toBeNull();
+            expect(anf2.ZugewieseneSlots).toHaveLength(2);
+            expect(anf2.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_slot');
+
+            expect(anf3.ZugewieseneSlots).not.toBeNull();
+            expect(anf3.ZugewieseneSlots).toHaveLength(1);
+            expect(anf3.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_slot');
+
+            // Resolution-Felder sollten zurückgesetzt sein
+            expect(konfliktDoku_final.zugewieseneAnfragen).toEqual([]);
+            expect(konfliktDoku_final.ListeAnfragenMitVerzicht).toEqual([]); // Diese werden durch den PUT /api/konflikte/:id gesetzt, nicht durch die reine Detektion
+            expect(konfliktDoku_final.abschlussdatum).toBeUndefined(); // Oder null, je nach deiner Reset-Logik im Controller
+            expect(konfliktDoku_final.notizen).toContain("neu bewertet/eröffnet");
+        });
+
 });

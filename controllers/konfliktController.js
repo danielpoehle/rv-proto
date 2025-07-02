@@ -76,15 +76,50 @@ async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, au
     return anfrageDoc;
 };
 
+// HILFSFUNKTION
 /**
- * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
+ * Aktualisiert den Status einer EINZELNEN Slot-Zuweisung innerhalb einer Anfrage.
+ * und ruft dann die Methode zur Neuberechnung des Gesamtstatus der Anfrage auf.
+ * @param {ObjectId|string} anfrageId
+ * @param {ObjectId|string} slotId - Der Slot, dessen Zuweisungsstatus geändert wird.
+ * @param {string} neuerStatus - Der neue statusEinzelzuweisung
+ */
+async function updateAnfrageEinzelSlotStatus(anfrageId, slotId, neuerStatus) {
+    const anfrage = await Anfrage.findById(anfrageId);
+    if (!anfrage || !anfrage.ZugewieseneSlots) return;
+
+    let anfrageModifiziert = false;
+    for (const zuweisung of anfrage.ZugewieseneSlots) {
+        if (zuweisung.slot.equals(slotId)) {
+            if (zuweisung.statusEinzelzuweisung !== neuerStatus) {
+                zuweisung.statusEinzelzuweisung = neuerStatus;
+                anfrageModifiziert = true;
+            }
+            break; // Wir haben den Eintrag gefunden
+        }
+    }
+
+    if (anfrageModifiziert) {
+        anfrage.markModified('ZugewieseneSlots');
+        await anfrage.updateGesamtStatus();
+        await anfrage.save();
+        console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrage.AnfrageID_Sprechend || anfrage._id} auf ${anfrage.Status} aktualisiert (neuer Einzelstatus für Slot ${slotId}: ${neuerStatus}).`);
+    }
+}
+
+/**
+ * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts im Kapazitätstopf
  * in der Phase "Verzicht/Verschub". Modifiziert Dokumente im Speicher.
- * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt (Typ KAPAZITAETSTOPF).
  * @param {Array} listeAnfragenMitVerzicht - Array von Anfrage-IDs.
  * @param {Array} listeAnfragenVerschubKoordination - Array von {anfrage, details} Objekten.
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten, die gespeichert werden müssen.
  */
-async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
+async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
+    if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF' || !konflikt.ausloesenderKapazitaetstopf) {
+        throw new Error('Diese Funktion ist nur für Topf-Konflikte mit einem auslösenden Kapazitätstopf vorgesehen.');
+    }
+
     const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
     let anfragenToSave = new Map(); // Sammelt modifizierte Anfrage-Dokumente, um doppeltes Speichern zu vermeiden
 
@@ -139,7 +174,7 @@ async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenM
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
             anfrageDoc.markModified
         }
-        console.log(`Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
+        console.log(`Topf-Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
     } else {
         // Konflikt besteht weiterhin, bereit für Entgeltvergleich
         konflikt.status = 'in_bearbeitung_entgelt';
@@ -150,7 +185,7 @@ async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenM
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
             anfrageDoc.markModified
         }
-        console.log(`Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
+        console.log(`Topf-Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
     }
     // Alte Resolution-Felder zurücksetzen, falls dies eine neue Lösung ist
     konflikt.abgelehnteAnfragenEntgeltvergleich = [];
@@ -160,6 +195,95 @@ async function resolveVerzichtVerschubForSingleConflict(konflikt, listeAnfragenM
 
     return { anfragenToSave };
 };
+
+/**
+ * Service-Funktion: Enthält die Kernlogik zur Lösung eines EINZELNEN SLOT-Konflikts
+ * in der Phase "Verzicht/Verschub". Modifiziert Dokumente im Speicher.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt (Typ SLOT).
+ * @param {Array} listeAnfragenMitVerzicht - Array von Anfrage-IDs.
+ * @param {Array} listeAnfragenVerschubKoordination - Array von {anfrage, details} Objekten.
+ * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
+ */
+async function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
+    if (konflikt.konfliktTyp !== 'SLOT' || !konflikt.ausloesenderSlot) {
+        throw new Error('Diese Funktion ist nur für Slot-Konflikte mit einem auslösenden Slot vorgesehen.');
+    }
+    const ausloesenderSlotId = konflikt.ausloesenderSlot._id;
+    let anfragenToSave = new Map();
+
+    // Verzicht und Verschub im Konfliktdokument festhalten
+    konflikt.ListeAnfragenMitVerzicht = listeAnfragenMitVerzicht.map(item => (typeof item === 'string' ? item : (item.anfrage || item._id || item)));
+    konflikt.ListeAnfragenVerschubKoordination = listeAnfragenVerschubKoordination;
+    konflikt.markModified('ListeAnfragenMitVerzicht');
+    konflikt.markModified('ListeAnfragenVerschubKoordination');
+
+    // Aktualisiere Einzelstatus der Anfragen, die verzichtet oder verschoben wurden
+    for (const anfrageId of konflikt.ListeAnfragenMitVerzicht) {
+        // Wichtig: Wir nutzen hier die spezialisierte Funktion, die nur den EINEN Slot-Status ändert!
+        const updatedAnfrage = await updateAnfrageEinzelSlotStatus(anfrageId, ausloesenderSlotId, 'abgelehnt_slot_verzichtet');
+        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+    }
+    for (const item of konflikt.ListeAnfragenVerschubKoordination) {
+        const updatedAnfrage = await updateAnfrageEinzelSlotStatus(item.anfrage, ausloesenderSlotId, 'abgelehnt_slot_verschoben');
+        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+    }
+    
+    // Ermittle "aktive" Anfragen, die noch um den Slot konkurrieren
+    const anfragenIdsMitVerzichtSet = new Set(konflikt.ListeAnfragenMitVerzicht.map(id => id.toString()));
+    const anfragenIdsMitVerschubSet = new Set(konflikt.ListeAnfragenVerschubKoordination.map(item => item.anfrage.toString()));
+    const aktiveAnfragenImKonflikt = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
+        !anfragenIdsMitVerzichtSet.has(anfrageDoc._id.toString()) && 
+        !anfragenIdsMitVerschubSet.has(anfrageDoc._id.toString())
+    );
+
+    // Prüfe Kapazität: Die Kapazität eines Slots ist immer 1
+    const maxKapazitaetSlot = 1;
+    if (aktiveAnfragenImKonflikt.length <= maxKapazitaetSlot) {
+        // Fall 1: Konflikt ist gelöst (0 oder 1 Anfrage übrig)
+        // Alte Resolution-Felder für Entgelt/Höchstpreis zurücksetzen, falls dies eine neue Lösung ist
+        konflikt.abgelehnteAnfragenEntgeltvergleich = [];
+        konflikt.abgelehnteAnfragenHoechstpreis = [];
+        konflikt.ReihungEntgelt = [];
+        konflikt.ListeGeboteHoechstpreis = [];
+
+        konflikt.zugewieseneAnfragen = aktiveAnfragenImKonflikt.map(a => a._id);
+        konflikt.status = 'geloest';
+        konflikt.abschlussdatum = new Date();
+        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub automatisch gelöst.`;
+
+        
+        // Wenn genau eine Anfrage übrig ist, hat sie den Slot gewonnen
+        if (aktiveAnfragenImKonflikt.length === 1) {
+            const gewinnerAnfrage = aktiveAnfragenImKonflikt[0];
+            // Hier könnte ein finaler Status wie 'bestaetigt_final' gesetzt werden,
+            // aber für Konsistenz nutzen wir 'bestaetigt_slot'.
+            const updatedAnfrage = await updateAnfrageEinzelSlotStatus(gewinnerAnfrage._id, ausloesenderSlotId, 'bestaetigt_slot');
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+        console.log(`Slot-Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
+    } else {
+        // Fall 2: Konflikt besteht weiterhin, bereit für Entgeltvergleich
+        konflikt.status = 'in_bearbeitung_entgelt';
+        konflikt.zugewieseneAnfragen = [];
+        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub nicht gelöst. Nächster Schritt: Entgeltvergleich.`;
+        
+        
+        // Setze den Status der verbleibenden Anfragen auf "wartet auf Entgeltentscheidung für Slot"
+        for (const anfrageDoc of aktiveAnfragenImKonflikt) {
+            const updatedAnfrage = await updateAnfrageEinzelSlotStatus(anfrageDoc._id, ausloesenderSlotId, 'wartet_entgeltentscheidung_slot');
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+        console.log(`Slot-Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
+    }
+    
+    // Alte Resolution-Felder zurücksetzen, da eine neue Entscheidung getroffen wurde
+    konflikt.abgelehnteAnfragenEntgeltvergleich = [];
+    konflikt.abgelehnteAnfragenHoechstpreis = [];
+    konflikt.ReihungEntgelt = [];
+    konflikt.ListeGeboteHoechstpreis = [];
+
+    return { anfragenToSave };
+}
 
 /**
  * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
@@ -651,6 +775,182 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
     }
 };
 
+// @desc    Synchronisiert Konfliktstatus: Identifiziert Überbuchungen in Slots,
+//          erstellt/aktualisiert Konfliktdokumente UND aktualisiert den Status
+//          der betroffenen Slot-Zuweisungen in den Anfragen.
+// @route   POST /api/konflikte/identifiziere-slot-konflikte
+exports.identifiziereSlotKonflikte = async (req, res) => {
+    try {
+        // 1. VORAUSSETZUNG PRÜFEN: Gibt es noch offene Topf-Konflikte?
+        const anzahlOffenerTopfKonflikte = await KonfliktDokumentation.countDocuments({
+            konfliktTyp: 'KAPAZITAETSTOPF',
+            status: { $ne: 'geloest' }
+        });
+
+        if (anzahlOffenerTopfKonflikte > 0) {
+            return res.status(409).json({ // 409 Conflict
+                message: `Aktion nicht möglich. Es existieren noch ${anzahlOffenerTopfKonflikte} ungelöste Kapazitätstopf-Konflikte.`
+            });
+        }
+
+        // 2. Lade alle Slots mit ihren zugewiesenen Anfragen
+        const alleSlots = await Slot.find({})
+            .populate({
+                path: 'zugewieseneAnfragen', // Anfragen, die diesen Slot wollen
+                select: 'ZugewieseneSlots Status', // Für die Status-Prüfung der Anfrage
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: '_id' // Nur die ID für den Vergleich
+                }
+            });
+
+        let neuErstellteKonfliktDokus = [];
+        let aktualisierteUndGeoeffneteKonflikte = [];
+        let unveraenderteBestehendeKonflikte = [];
+        let autoGeloesteKonflikte = []; // Um aufzulisten, welche Konflikte sich von selbst gelöst haben
+        let slotsOhneKonflikt = [];
+
+        // Definiere alle Status, die als "aktiv" für einen Slot-Konflikt gelten
+        const aktiveSlotKonfliktStatusse = [
+            'bestaetigt_topf',
+            'bestaetigt_topf_entgelt',
+            'bestaetigt_topf_hoechstpreis',
+            'wartet_konflikt_slot',
+            'wartet_entgeltentscheidung_slot',
+            'wartet_hoechstpreis_slot',
+            'bestaetigt_slot',
+            'bestaetigt_slot_entgelt',
+            'bestaetigt_slot_hoechstpreis',
+            'bestaetigt_slot_nachgerueckt'
+        ];
+
+        for (const slot of alleSlots) {
+            // 3. Ermittle "aktive" Anfragen für DIESEN Slot
+            const aktiveAnfragenFuerSlot = slot.zugewieseneAnfragen.filter(anfrage => {
+                // Finde die spezifische Zuweisung dieses Slots in der Anfrage
+                const zuweisung = anfrage.ZugewieseneSlots.find(zs => zs.slot?._id.equals(slot._id));
+                // Eine Anfrage ist aktiv, wenn ihr Einzelstatus für diesen Slot in der Liste der aktiven Status enthalten ist.
+                return zuweisung && aktiveSlotKonfliktStatusse.includes(zuweisung.statusEinzelzuweisung);
+            });
+
+            // wenn es keine aktiven Anfragen gibt, dann gibt es auch nichts zu tun für den Slot
+            if(aktiveAnfragenFuerSlot.length <=0) {
+                slotsOhneKonflikt.push(slot.SlotID_Sprechend || slot._id);
+                continue;
+            }
+            
+            const maxKapazitaetSlot = 1;
+            const istUeberbucht = aktiveAnfragenFuerSlot.length > maxKapazitaetSlot;
+
+            if (istUeberbucht) {
+                console.log(`Konflikt auf Slot ${slot.SlotID_Sprechend}: ${aktiveAnfragenFuerSlot.length} aktive Anfragen > maxKap ${maxKapazitaetSlot}`);
+
+                // 4. Konfliktdokument erstellen/aktualisieren (gleiche Logik wie bei Töpfen)
+                let konfliktDoku = await KonfliktDokumentation.findOne({ ausloesenderSlot: slot._id });
+                const aktuelleBeteiligteAnfragenIds = aktiveAnfragenFuerSlot.map(a => a._id);
+
+                if (konfliktDoku) {
+                    if (!sindObjectIdArraysGleich(aktuelleBeteiligteAnfragenIds, konfliktDoku.beteiligteAnfragen)) {
+                        // Reset des Konflikts
+
+                        console.log(`Konfliktdokument ${konfliktDoku._id} für Slot ${slot.SlotID_Sprechend}: Beteiligte Anfragen haben sich geändert. Wird zurückgesetzt.`);
+                        konfliktDoku.beteiligteAnfragen = aktuelleBeteiligteAnfragenIds;
+                        konfliktDoku.konfliktTyp = 'SLOT';
+                        konfliktDoku.status = 'offen';
+                        konfliktDoku.zugewieseneAnfragen = [];
+                        konfliktDoku.abgelehnteAnfragenEntgeltvergleich = [];
+                        konfliktDoku.abgelehnteAnfragenHoechstpreis = [];
+                        konfliktDoku.ReihungEntgelt = [];
+                        konfliktDoku.ListeGeboteHoechstpreis = [];
+                        konfliktDoku.ListeAnfragenMitVerzicht = [];
+                        konfliktDoku.ListeAnfragenVerschubKoordination = [];
+                        konfliktDoku.abschlussdatum = undefined;
+                        konfliktDoku.notizen = `${konfliktDoku.notizen || ''}\nKonflikt am ${new Date().toISOString()} neu bewertet/eröffnet aufgrund geänderter Anfragesituation. Ursprünglicher Status: ${konfliktDoku.status}.`;
+                        
+
+                        await konfliktDoku.save();
+                        aktualisierteUndGeoeffneteKonflikte.push(konfliktDoku);
+                        
+                        // Alle Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_slot'
+                        for (const anfrage of aktiveAnfragenFuerSlot) {
+                            await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'wartet_konflikt_slot');
+                        }
+                    }else { // Anfragen im Slot sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist
+                        console.log(`Konfliktdokument ${konfliktDoku._id} für Slot ${slot.SlotID_Sprechend || slot._id}: Beteiligte Anfragen sind identisch. Status (${konfliktDoku.status}) bleibt erhalten.`);
+                        unveraenderteBestehendeKonflikte.push(konfliktDoku);
+                    }
+                } else {// Slot ist überbucht aber es gibt noch keine Konfliktdoku --> neu initial anlegen
+                    const neuesKonfliktDoku = new KonfliktDokumentation({
+                        konfliktTyp: 'SLOT',
+                        beteiligteAnfragen: aktuelleBeteiligteAnfragenIds,
+                        ausloesenderSlot: slot._id,
+                        status: 'offen',
+                        notizen: `Automatisch erstellter Konflikt für Slot ${slot.SlotID_Sprechend || slot._id} am ${new Date().toISOString()}. ${aktiveAnfragenFuerSlot.length} Anfragen bei max. Kapazität von 1.`
+                    });
+                    await neuesKonfliktDoku.save();
+                    neuErstellteKonfliktDokus.push(neuesKonfliktDoku);
+
+                    // Alle aktiven Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
+                    for (const anfrage of aktiveAnfragenFuerSlot) {
+                        await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'wartet_konflikt_slot');
+                    }
+
+                    console.log(`Neues Konfliktdokument ${neuesKonfliktDoku._id} für Slot ${slot.SlotID_Sprechend || slot._id} erstellt. ${aktiveAnfragenFuerSlot.length} Anfragen bei max. Kapazität von 1.`);
+                }   
+
+            } else {// Slot ist nicht überbucht: Entweder er hatte keinen Konflikt oder wurde früher schon gelöst.
+                slotsOhneKonflikt.push(slot.SlotID_Sprechend || slot._id);
+
+                let offenerKonflikt = await KonfliktDokumentation.findOne({
+                    ausloesenderSlot: slot._id
+                }).sort({ updatedAt: -1 });
+
+                // Status der Anfragen aktualisieren, wenn der Konflikt noch nicht gelöst wurde                
+                if(offenerKonflikt && offenerKonflikt.status !== 'geloest'){
+                    // Die eine aktive Anfrage in diesem Slot wird "bestätigt" (auf Slot-Ebene)
+                    for (const anfrage of aktiveAnfragenFuerSlot) {
+                        await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'bestaetigt_slot');
+                    }
+                    console.log(`Konflikt ${offenerKonflikt._id} für Slot ${slot.SlotID_Sprechend || slot._id} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
+                    offenerKonflikt.status = 'geloest';
+                    offenerKonflikt.abschlussdatum = new Date();
+                    offenerKonflikt.notizen = `${offenerKonflikt.notizen || ''}\nKonflikt am ${new Date().toISOString()} automatisch gelöst, da Kapazität nicht mehr überschritten.`;
+                    // Die Anfragen, die noch im Topf sind, sind die "Gewinner"
+                    offenerKonflikt.zugewieseneAnfragen = aktiveAnfragenFuerSlot.map(a => a._id);
+                    await offenerKonflikt.save();
+                    autoGeloesteKonflikte.push(offenerKonflikt);
+                }
+                // Wenn keine Konfliktdoku existiert, dann war der Topf nie überbucht und kann gelöst werden
+                if(!offenerKonflikt){
+                    for (const anfrage of aktiveAnfragenFuerSlot) {
+                        await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'bestaetigt_slot');
+                    }
+                    console.log(`Slot ${slot.SlotID_Sprechend || slot._id} hatte keinen Konflikt und die Anfragen werden automatisch auf 'bestaetigt_slot' gesetzt, da keine Überbuchung besteht.`);
+
+                }
+            }
+        }
+
+        // AM ENDE der Funktion: Rufe die Service-Funktion auf, um die Gruppen zu synchronisieren
+        await konfliktService.aktualisiereKonfliktGruppen();
+
+        res.status(200).json({ 
+            message: 'Konfliktdetektion für Slots abgeschlossen.',
+            neuErstellteKonflikte: neuErstellteKonfliktDokus.map(d => ({ id: d._id, slot: d.ausloesenderSlot, status: d.status })),
+            aktualisierteUndGeoeffneteKonflikte: aktualisierteUndGeoeffneteKonflikte.map(d => ({ id: d._id, slot: d.ausloesenderSlot, status: d.status })),
+            unveraenderteBestehendeKonflikte: unveraenderteBestehendeKonflikte.map(d => ({ id: d._id, slot: d.ausloesenderSlot, status: d.status })),
+            autoGeloesteKonflikte: autoGeloesteKonflikte.map(d => ({ id: d._id, slot: d.ausloesenderSlot, status: d.status })),
+            slotsOhneKonflikt: slotsOhneKonflikt
+         });
+
+    } catch (error) {
+        console.error('Fehler bei der Identifizierung von Slot-Konflikten:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Slot-Konflikterkennung.' });
+    }
+};
+
+
 // @desc    Ruft alle Konfliktdokumentationen ab
 // @route   GET /api/konflikte
 exports.getAllKonflikte = async (req, res) => {
@@ -809,7 +1109,7 @@ exports.getKonfliktById = async (req, res) => {
 };
 
 // Phase 1 Controller-Funktion
-// @desc    Verarbeitet Verzichte/Verschiebungen und löst Konflikt ggf. automatisch
+// @desc    Verarbeitet Verzichte/Verschiebungen und löst Topf-Konflikt ggf. automatisch
 // @route   PUT /api/konflikte/:konfliktId/verzicht-verschub
 exports.verarbeiteVerzichtVerschub = async (req, res) => {
     const { konfliktId } = req.params;
@@ -829,6 +1129,8 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
         if (!konflikt) {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
         }
+        if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF') return res.status(400).json({ message: 'Dieser Endpunkt ist nur für Topf-Konflikte.' });
+       
         if (!konflikt.ausloesenderKapazitaetstopf) {
             return res.status(500).json({ message: 'Konfliktdokumentation hat keinen verknüpften Kapazitätstopf.' });
         }
@@ -838,7 +1140,7 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
         }
 
         // Rufe die zentrale Service-Funktion auf        
-        const { anfragenToSave } = await resolveVerzichtVerschubForSingleConflict(
+        const { anfragenToSave } = await resolveVerzichtVerschubForSingleTopfConflict(
             konflikt,
             ListeAnfragenMitVerzicht,
             ListeAnfragenVerschubKoordination
@@ -867,7 +1169,7 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
         }
 
         res.status(200).json({
-            message: `Verzicht/Verschub für Konflikt ${konflikt.TopfID || konflikt._id} verarbeitet. Neuer Status: ${aktualisierterKonflikt.status}`,
+            message: `Verzicht/Verschub für Topf-Konflikt ${konflikt.TopfID || konflikt._id} verarbeitet. Neuer Status: ${aktualisierterKonflikt.status}`,
             data: aktualisierterKonflikt
         });
 
@@ -877,6 +1179,63 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
             return res.status(400).json({ message: 'Ungültige Daten im Request Body (z.B. ObjectId Format).', errorDetails: error.message });
         }
         res.status(500).json({ message: 'Serverfehler bei der Verarbeitung von Verzicht/Verschub.' });
+    }
+};
+
+// --- Controller für EINZELNEN Slot-Konflikt ---
+// @desc    Phase 1: Verarbeitet Verzicht/Verschub für einen einzelnen Slot-Konflikt
+// @route   PUT /api/konflikte/slot/:konfliktId/verzicht-verschub
+exports.verarbeiteEinzelSlotVerzichtVerschub = async (req, res) => {
+    const { konfliktId } = req.params;
+    const { ListeAnfragenMitVerzicht, ListeAnfragenVerschubKoordination, notizen, notizenUpdateMode } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(konfliktId)) return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
+
+    try {
+        const konflikt = await KonfliktDokumentation.findById(konfliktId)
+            .populate('beteiligteAnfragen', '_id Status Entgelt ZugewieseneSlots')
+            .populate('ausloesenderSlot', '_id SlotID_Sprechend');
+
+        if (!konflikt) return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
+        if (konflikt.konfliktTyp !== 'SLOT') return res.status(400).json({ message: 'Dieser Endpunkt ist nur für Slot-Konflikte.' });
+        if (!['offen', 'in_bearbeitung'].includes(konflikt.status)) {
+            return res.status(400).json({ message: `Konflikt ist im Status '${konflikt.status}' und kann nicht bearbeitet werden.` });
+        }
+
+        // Rufe die zentrale Service-Funktion auf
+        const { anfragenToSave } = await resolveVerzichtVerschubForSingleSlotConflict(
+            konflikt,
+            ListeAnfragenMitVerzicht,
+            ListeAnfragenVerschubKoordination
+        );
+        
+        // Notizen für den Einzelkonflikt aktualisieren
+        if (notizen !== undefined) {
+            const notizPrefix = `Ergänzung vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && konflikt.notizen) {
+                konflikt.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                konflikt.notizen = (konflikt.notizen && notizenUpdateMode === 'append' ? konflikt.notizen + "\n---\n" : "") + notizPrefix + notizen;
+            }
+            konflikt.markModified('notizen');
+        }
+
+        const aktualisierterKonflikt = await konflikt.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Verzicht/Verschub für Slot-Konflikt ${aktualisierterKonflikt._id} verarbeitet. Neuer Status: ${aktualisierterKonflikt.status}`,
+            data: aktualisierterKonflikt
+        });
+
+    } catch (error) {
+        console.error(`Fehler bei PUT /api/konflikte/slot/${konfliktId}/verzicht-verschub:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung des Slot-Konflikts.' });
     }
 };
 
@@ -1046,7 +1405,8 @@ exports.identifiziereKonfliktGruppen = async (req, res) => {
     }
 };
 
-// @desc    Verarbeitet Verzichte/Verschiebungen für eine ganze Konfliktgruppe
+// --- Controller für eine GRUPPE von Topf-Konflikten ---
+// @desc    Verarbeitet Verzichte/Verschiebungen für eine ganze Topf-Konfliktgruppe
 // @route   PUT /api/konflikte/gruppen/:gruppenId/verzicht-verschub
 exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
     const { gruppenId } = req.params;
@@ -1083,8 +1443,10 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
 
         // Iteriere durch jeden einzelnen Konflikt der Gruppe
         for (const konflikt of gruppe.konflikteInGruppe) {
+            if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF') continue; // Überspringe fälschlicherweise zugeordnete Slot-Konflikte
+
             // Rufe die zentrale Service-Funktion auf
-            const { anfragenToSave } = await resolveVerzichtVerschubForSingleConflict(
+            const { anfragenToSave } = await resolveVerzichtVerschubForSingleTopfConflict(
                 konflikt,
                 ListeAnfragenMitVerzicht,
                 ListeAnfragenVerschubKoordination
@@ -1127,7 +1489,7 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
         }
 
         res.status(200).json({
-            message: `Verzicht/Verschub für Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            message: `Verzicht/Verschub für Topf-Konfliktgruppe ${gruppe._id} verarbeitet.`,
             data: {
                 gruppe: aktualisierteGruppe,
                 zusammenfassung: {
@@ -1140,6 +1502,93 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
     } catch (error) {
         console.error(`Fehler bei PUT /api/konflikte/gruppen/${gruppenId}/verzicht-verschub:`, error);
         res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
+    }
+};
+
+// --- Controller für eine GRUPPE von Slot-Konflikten ---
+// @desc    Phase 1: Verarbeitet Verzicht/Verschub für eine ganze Slot-Konfliktgruppe
+// @route   PUT /api/konflikte/slot-gruppen/:gruppenId/verzicht-verschub
+exports.verarbeiteSlotGruppenVerzichtVerschub = async (req, res) => {
+    const { gruppenId } = req.params;
+    const { ListeAnfragenMitVerzicht, ListeAnfragenVerschubKoordination, notizen, notizenUpdateMode } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+
+    try {
+        const gruppe = await KonfliktGruppe.findById(gruppenId).populate({
+            path: 'konflikteInGruppe',
+            populate: [
+                { path: 'beteiligteAnfragen', select: '_id Status Entgelt' },
+                { path: 'ausloesenderSlot', select: '_id' }
+            ]
+        });
+        if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        if (!['offen', 'in_bearbeitung_verzicht'].includes(gruppe.status)) {
+             return res.status(400).json({ message: `Konfliktgruppe ist im Status '${gruppe.status}' und kann nicht bearbeitet werden.` });
+        }
+
+        let alleAnfragenZumSpeichern = new Map();
+        let anzahlOffenerKonflikte = 0;
+
+        // Iteriere durch jeden einzelnen Konflikt der Gruppe
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            if (konflikt.konfliktTyp !== 'SLOT') continue; // Überspringe fälschlicherweise zugeordnete Topf-Konflikte
+
+            const { anfragenToSave } = await resolveVerzichtVerschubForSingleSlotConflict(
+                konflikt,
+                ListeAnfragenMitVerzicht,
+                ListeAnfragenVerschubKoordination
+            );
+            
+            // Füge modifizierte Anfragen zur Map hinzu (Duplikate werden durch Map-Struktur vermieden)
+            anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
+            if (konflikt.status !== 'geloest') anzahlOffenerKonflikte++;
+            
+            await konflikt.save(); // Speichere die Änderungen am einzelnen Konfliktdokument
+        }
+
+        // Aktualisiere den Gesamtstatus der Gruppe
+        if (anzahlOffenerKonflikte > 0) {
+            gruppe.status = 'in_bearbeitung_entgelt'; //es geht dann weiter mit dem Engeltvergleich
+        } else {
+            gruppe.status = 'vollstaendig_geloest';
+        }
+
+        // Notizen für die Gruppe
+        if (notizen !== undefined) {
+             const notizPrefix = `Gruppen-Notiz vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && gruppe.notizen) {
+                gruppe.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                gruppe.notizen = notizPrefix + notizen;
+            }
+        }
+
+        const aktualisierteGruppe = await gruppe.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+            //console.log(`anfrageDoc vor Statusupdate ${anfrageDoc}`);
+             await anfrageDoc.updateGesamtStatus();
+             //console.log(`anfrageDoc nach Statusupdate ${anfrageDoc}`);
+             await anfrageDoc.save();
+        }        
+
+        res.status(200).json({
+            message: `Verzicht/Verschub für Slot-Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            data: {
+                gruppe: aktualisierteGruppe,
+                zusammenfassung: {
+                    anzahlKonflikteInGruppe: gruppe.konflikteInGruppe.length,
+                    davonGeloest: gruppe.konflikteInGruppe.length - anzahlOffenerKonflikte,
+                    davonOffen: anzahlOffenerKonflikte
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error(`Fehler bei PUT /api/konflikte/slot-gruppen/${gruppenId}/verzicht-verschub:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Slot-Konfliktgruppe.' });
     }
 };
 

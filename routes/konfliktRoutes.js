@@ -3,10 +3,18 @@ const express = require('express');
 const router = express.Router();
 const konfliktController = require('../controllers/konfliktController'); 
 
+// ROUTE für Kapazitätstopf-Konflikterkennung
 // @route   POST /api/konflikte/identifiziere-topf-konflikte
 // @desc    Identifiziert Überbuchungen in Kapazitätstöpfen und legt Konfliktdokumente an, bildet dabei zusätzlich Gruppen von Konflikten mit identischen beteiligten Anfragen
 // @access  Admin/System (angenommen)
 router.post('/identifiziere-topf-konflikte', konfliktController.identifiziereTopfKonflikte);
+
+// ROUTE für Slot-Konflikterkennung
+// @route   POST /api/konflikte/identifiziere-slot-konflikte
+// @desc    Identifiziert Überbuchungen in Slots und legt Konfliktdokumente an, bildet dabei zusätzlich Gruppen von Konflikten mit identischen beteiligten Anfragen
+// @access  Admin/System (angenommen)
+router.post('/identifiziere-slot-konflikte', konfliktController.identifiziereSlotKonflikte);
+
 
 // ROUTE zum Abruf aller Gruppen von Konflikten
 // @route   GET /api/konflikte/gruppen
@@ -25,16 +33,24 @@ router.get('/', konfliktController.getAllKonflikte);
 router.get('/:konfliktId', konfliktController.getKonfliktById);
 
 // ROUTEN für die phasenweise Konfliktlösung der Kapazitätstöpfe
-// Phase 1: Verzicht und Verschub für einen Konflikt
+
+// Phase 1: Verzicht und Verschub für einen Topf-Konflikt
+// @desc    Führt Verzicht / Verschub für einen EINZELNEN Topf-Konflikt durch
+// @route   PUT /api/konflikte/:konfliktId/verzicht-verschub
 router.put('/:konfliktId/verzicht-verschub', konfliktController.verarbeiteVerzichtVerschub);
 
+// Phase 1: Verzicht und Verschub für einen Slot-Konflikt
+// @desc    Führt Verzicht / Verschub für einen EINZELNEN Slot-Konflikt durch
+// @route   PUT /api/konflikte/slot/:konfliktId/verzicht-verschub
+router.put('/slot/:konfliktId/verzicht-verschub', konfliktController.verarbeiteEinzelSlotVerzichtVerschub);
+
 // Phase 2: Entgeltvergleich für einen Konflikt
-// @desc    Führt den Entgeltvergleich für einen EINZELNEN Konflikt durch
+// @desc    Führt den Entgeltvergleich für einen EINZELNEN Topf-Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/entgeltvergleich
 router.put('/:konfliktId/entgeltvergleich', konfliktController.fuehreEntgeltvergleichDurch);
 
 // Phase 3: Höchstpreis-Ergebnis für einen Konflikt
-// @desc    Führt das Höchstpreisverfahren für einen EINZELNEN Konflikt durch
+// @desc    Führt das Höchstpreisverfahren für einen EINZELNEN Topf-Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/hoechstpreis-ergebnis
 router.put('/:konfliktId/hoechstpreis-ergebnis', konfliktController.verarbeiteHoechstpreisErgebnis);
 
@@ -43,11 +59,19 @@ router.put('/:konfliktId/hoechstpreis-ergebnis', konfliktController.verarbeiteHo
 router.get('/gruppen/:gruppenId', konfliktController.getKonfliktGruppeById);
 
 // ROUTEN für die phasenweise GRUPPEN-Konfliktlösung
-// Phase 1: Verzicht und Verschub für eine Gruppe
+
+// Phase 1: Verzicht und Verschub für eine Gruppe von Topf-Konflikten
 // @route   PUT /api/konflikte/gruppen/:gruppenId/verzicht-verschub
-// @desc    Phase 1: Verarbeitet Verzichte/Verschiebungen für eine ganze Konfliktgruppe
+// @desc    Phase 1: Verarbeitet Verzichte/Verschiebungen für eine ganze Konfliktgruppe von Topf-Konflikten
 // @access  Admin/System
 router.put('/gruppen/:gruppenId/verzicht-verschub', konfliktController.verarbeiteGruppenVerzichtVerschub);
+
+
+// Phase 1: Verzicht und Verschub für eine Gruppe von Slot-Konflikten
+// @route   PUT /api/konflikte/slot-gruppen/:gruppenId/verzicht-verschub
+// @desc    Phase 1: Verarbeitet Verzichte/Verschiebungen für eine ganze Konfliktgruppe von Slot-Konflikten
+router.put('/slot-gruppen/:gruppenId/verzicht-verschub', konfliktController.verarbeiteSlotGruppenVerzichtVerschub);
+
 
 
 // ROUTE für Gruppen-Entgeltvergleich

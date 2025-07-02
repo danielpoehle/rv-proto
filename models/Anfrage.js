@@ -139,7 +139,7 @@ anfrageSchema.methods.updateGesamtStatus = async function() {
     const hatSlotLevelKonflikt = einzelStatus.some(s => s.startsWith('wartet_') && s.endsWith('_slot'));
     const hatTopfLevelKonflikt = einzelStatus.some(s => s.startsWith('wartet_') && s.endsWith('_topf'));
     const alleTopfKonflikteEntschieden = !einzelStatus.some(s => s === 'initial_in_konfliktpruefung_topf' || (s.startsWith('wartet_') && s.endsWith('_topf')));
-    const alleFinalEntschieden = !einzelStatus.some(s => !s.startsWith('bestaetigt_slot_') && !s.startsWith('abgelehnt_'));
+    const alleFinalEntschieden = !einzelStatus.some(s => !s.startsWith('bestaetigt_slot') && !s.startsWith('abgelehnt'));
 
     const hatBestaetigteTopfSlots = einzelStatus.some(s => s.startsWith('bestaetigt_topf'));
     const hatAbgelehnteTopfSlots = einzelStatus.some(s => s.startsWith('abgelehnt_topf'));

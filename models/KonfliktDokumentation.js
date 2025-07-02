@@ -29,7 +29,11 @@ const konfliktDokumentationSchema = new Schema({
     }],
     erstellungsdatum: { type: Date, default: Date.now },
     abschlussdatum: { type: Date },
-    konfliktTyp: String,
+    konfliktTyp: {
+        type: String,
+        required: true,
+        enum: ['KAPAZITAETSTOPF', 'SLOT'] // Wir erzwingen, dass nur diese beiden Werte möglich sind
+    },
     status: {
     type: String,
     required: true,
@@ -44,7 +48,20 @@ const konfliktDokumentationSchema = new Schema({
     default: 'offen'
 },
     notizen: String,
-    ausloesenderKapazitaetstopf: { type: Schema.Types.ObjectId, ref: 'Kapazitaetstopf', required: true }
+    ausloesenderKapazitaetstopf: {
+        type: Schema.Types.ObjectId,
+        ref: 'Kapazitaetstopf',
+        // 'required' ist jetzt eine Funktion!
+        // Dieses Feld ist nur erforderlich, wenn 'konfliktTyp' den Wert 'KAPAZITAETSTOPF' hat.
+        required: function() { return this.konfliktTyp === 'KAPAZITAETSTOPF'; }
+    },
+    ausloesenderSlot: {
+        type: Schema.Types.ObjectId,
+        ref: 'Slot',
+        // 'required' ist jetzt eine Funktion!
+        // Dieses Feld ist nur erforderlich, wenn 'konfliktTyp' den Wert 'SLOT' hat.
+        required: function() { return this.konfliktTyp === 'SLOT'; }
+    }
 }, { timestamps: true });
 
 module.exports = mongoose.model('KonfliktDokumentation', konfliktDokumentationSchema);
