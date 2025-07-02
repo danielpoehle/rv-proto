@@ -412,7 +412,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             }).save();
     });
 
-    it('sollte Anfragen automatisch zuweisen und Konflikt lösen, wenn nach Verzicht die Kapazität ausreicht', async () => {
+    it('sollte Anfragen automatisch zuweisen und Topf-Konflikt lösen, wenn nach Verzicht die Kapazität ausreicht', async () => {
         // Aktion: Eine Anfrage (anfrage3) verzichtet. maxKap = 2. Verbleiben 2 Anfragen.
             const updatePayload = {
                 ListeAnfragenMitVerzicht: [anfrage3._id.toString()],
@@ -1737,4 +1737,151 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             expect(konfliktDoku_final.notizen).toContain("neu bewertet/eröffnet");
         });
 
+});
+
+describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: automatische Zuweisung bei ausreichendem Verzicht in Slot-Konflikt', () => {
+    
+    let anfragenIds = [];
+    let konfliktDokuDB;
+    jest.setTimeout(60000);
+
+    // Wenn du manuelle Bereinigung pro Testfall brauchst:
+    beforeAll(async () => {
+        // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
+        // Diese Verbindung muss die URI zur Docker-DB nutzen
+        await mongoose.connect(process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots');
+    });
+    
+    afterAll(async () => {
+        await mongoose.disconnect();
+    });
+
+
+    beforeEach(async () => {
+
+        if (mongoose.connection.readyState === 0) {
+            const testDbUri = process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots';
+            await mongoose.connect(testDbUri);
+        }
+        // Leere Collections
+        const collections = mongoose.connection.collections;
+        for (const key in collections) {
+            const collection = collections[key];
+            await collection.deleteMany({});
+        }    
+
+        
+
+        // 6 Slots für Abschn1 erstellen, um maxKapazitaet = floor(0.7*6) = 4 zu erhalten
+        const slotBasis = { von: "Y", bis: "Z", Abschnitt: "Abschn1", 
+                                Verkehrstag: "Sa+So", Kalenderwoche: 2, Verkehrsart: "SGV",
+                                Grundentgelt: 150 
+                            };
+        let s1 = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } });
+        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } });
+        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } });
+        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } });
+        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } });
+        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } });
+
+        let kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+        expect(kt_DetectConflict.maxKapazitaet).toBe(4);
+
+        const anfrageBasis = { Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
+        const anfragePromises = [];
+        
+        //4 Anfrage konkurrieren um den gleichen Slot
+        anfragePromises.push(new Anfrage({ ...anfrageBasis, EVU: `ConflictEVU1` , Zugnummer: `C1`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+        anfragePromises.push(new Anfrage({ ...anfrageBasis, EVU: `ConflictEVU2` , Zugnummer: `C2`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+        anfragePromises.push(new Anfrage({ ...anfrageBasis, EVU: `ConflictEVU3` , Zugnummer: `C3`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+        anfragePromises.push(new Anfrage({ ...anfrageBasis, EVU: `ConflictEVU4` , Zugnummer: `C4`, ListeGewuenschterSlotAbschnitte: [{von: "Y", bis:"Z", Abfahrtszeit: {stunde:13, minute:10 }, Ankunftszeit:{stunde:14,minute:0}}] }).save());
+
+        const erstellteAnfragen = await Promise.all(anfragePromises);
+        anfragenIds = erstellteAnfragen.map(a => a._id);
+
+        await request(app).post(`/api/anfragen/${anfragenIds[0]._id}/zuordnen`).send();
+        await request(app).post(`/api/anfragen/${anfragenIds[1]._id}/zuordnen`).send();
+        await request(app).post(`/api/anfragen/${anfragenIds[2]._id}/zuordnen`).send();
+        await request(app).post(`/api/anfragen/${anfragenIds[3]._id}/zuordnen`).send();
+
+        kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+        expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(4); //kein Konflikt 4 Anfragen für 4 Kapazitäten
+        
+        //Erster Schritt: Topf-Konflikte
+        let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+        
+        // Überprüfung der Antwort
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Konfliktdetektion für Kapazitätstöpfe abgeschlossen.');
+        expect(response.body.neuErstellteKonflikte).toHaveLength(0);
+        expect(response.body.toepfeOhneKonflikt).toHaveLength(1);
+
+        //Zweiter Schritt: Slot-Konflikte
+        response = await request(app)
+                .post('/api/konflikte/identifiziere-slot-konflikte')
+                .send();
+
+        // Überprüfung der Antwort
+        expect(response.status).toBe(200);
+        expect(response.body.message).toBe('Konfliktdetektion für Slots abgeschlossen.');
+        expect(response.body.neuErstellteKonflikte).toHaveLength(1);
+        expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
+        expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
+        expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+        expect(response.body.slotsOhneKonflikt).toHaveLength(5);
+
+        const konfliktDokuId = response.body.neuErstellteKonflikte[0].id;
+
+        // Überprüfung des erstellten Konfliktdokuments in der DB
+        konfliktDokuDB = await KonfliktDokumentation.findById(konfliktDokuId);
+        expect(konfliktDokuDB).not.toBeNull();
+        expect(konfliktDokuDB.status).toBe('offen');
+    });
+
+    it('sollte Anfragen automatisch zuweisen und Slot-Konflikt lösen, wenn nach Verzicht die Kapazität ausreicht', async () => {
+        // Aktion: 3 Anfragen (anfrage1,3,4) verzichtet. Anfrage 2 gewinnt.
+            const updatePayload = {
+                ListeAnfragenMitVerzicht: [anfragenIds[0].toString(), anfragenIds[2].toString(), anfragenIds[3].toString()],
+            };
+
+            const response = await request(app)
+                .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+                .send(updatePayload);
+
+            expect(response.status).toBe(200);
+            
+            const aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+            // Überprüfung des Konfliktdokuments
+            expect(aktualisierteKonfliktDoku.status).toBe('geloest');
+            expect(aktualisierteKonfliktDoku.ListeAnfragenMitVerzicht.map(id => id.toString()).sort()).toEqual([anfragenIds[0].toString(), anfragenIds[2].toString(), anfragenIds[3].toString()].sort());
+            
+            const zugewieseneIdsKonflikt = aktualisierteKonfliktDoku.zugewieseneAnfragen.map(id => id.toString());
+            expect(zugewieseneIdsKonflikt).toHaveLength(1);
+            expect(zugewieseneIdsKonflikt).toContain(anfragenIds[1].toString());
+            expect(aktualisierteKonfliktDoku.abschlussdatum).toBeDefined();
+
+            // Überprüfung der Anfragen-Status und Einzelzuweisungen
+            const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+            const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+            const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+            const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+            // console.log(a1_updated);
+
+
+            expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
+            expect(a1_updated.Status).toBe('final_abgelehnt'); 
+
+            expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');          
+            expect(a2_updated.Status).toBe('vollstaendig_final_bestaetigt'); 
+
+            expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
+            expect(a3_updated.Status).toBe('final_abgelehnt'); 
+
+            expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
+            expect(a4_updated.Status).toBe('final_abgelehnt'); 
+
+    });
 });

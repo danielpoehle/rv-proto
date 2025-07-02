@@ -13,7 +13,7 @@ const { parseISO, addDays } = require('date-fns');
 const GLOBAL_KW1_START_DATE_ISO = "2024-12-30T00:00:00.000Z";
 
 
-describe('Gruppierte Konfliktlösung', () => {
+describe('Gruppierte Topf-Konfliktlösung', () => {
     jest.setTimeout(60000);
     let anfrage_A, anfrage_B, anfrage_C, anfrage_D;
     let erstellteSlots = [];
@@ -128,7 +128,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 
     // ----- TEST 1: GRUPPEN-IDENTIFIZIERUNG -----
-    it('sollte korrekt eine Konfliktgruppe mit 12 Konflikten und 4 beteiligten Anfragen identifizieren', async () => {
+    it('sollte korrekt eine Konfliktgruppe mit 12 Topf-Konflikten und 4 beteiligten Anfragen identifizieren', async () => {
         // Aktion
         const response = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(response.body);
@@ -149,7 +149,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 
     // ----- TEST 2: GRUPPEN-KONFLIKTLÖSUNG (PHASE 1) -----
-    it('sollte eine Gruppenentscheidung (Verzicht) korrekt auf alle 12 Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung (Verzicht) korrekt auf alle 12 Topf-onflikte anwenden und diese lösen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -199,7 +199,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 
     // ----- TEST 3: GRUPPEN-KONFLIKTLÖSUNG (PHASE 2 Entgeltvergleich mit eindeutigem Ergebnis) -----
-    it('sollte eine Gruppenentscheidung (Entgeltvergleich eindeutig) korrekt auf alle 12 Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung (Entgeltvergleich eindeutig) korrekt auf alle 12 Topf-Konflikte anwenden und diese lösen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -279,7 +279,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 
     // ----- TEST 4: GRUPPEN-KONFLIKTLÖSUNG (PHASE 2 Entgeltvergleich führt zu Höchstpreisverfahren) -----
-    it('sollte eine Gruppenentscheidung (Entgeltvergleich Gleichstand) korrekt auf alle 12 Konflikte anwenden und diese als ungelöst markieren', async () => {
+    it('sollte eine Gruppenentscheidung (Entgeltvergleich Gleichstand) korrekt auf alle 12 Topf-Konflikte anwenden und diese als ungelöst markieren', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -369,7 +369,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 
     // ----- TEST 5: GRUPPEN-KONFLIKTLÖSUNG (PHASE 3 Durchführung Höchstpreisverfahren) -----
-    it('sollte eine Gruppenentscheidung (Höchstpreisverfahren) korrekt auf alle 12 Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung (Höchstpreisverfahren) korrekt auf alle 12 Topf-Konflikte anwenden und diese lösen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -485,7 +485,7 @@ describe('Gruppierte Konfliktlösung', () => {
     });
 });
 
-describe('Konfliktgruppen-Status-Synchronisation', () => {
+describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
         beforeAll(async () => {
             // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
