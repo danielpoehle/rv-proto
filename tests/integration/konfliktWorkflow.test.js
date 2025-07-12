@@ -642,7 +642,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
         });
 
         // NEUER TESTFALL für Entgeltvergleich, eindeutige Entscheidung.
-        it('sollte Konflikt durch Entgeltvergleich lösen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen (granularer Status)', async () => {
+        it('sollte Topf-Konflikt durch Entgeltvergleich lösen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen (granularer Status)', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 3 Anfragen für maxKapazität=1 ----
             let kt_Entgelt, anfrageHoch, anfrageMittel, anfrageNiedrig, konfliktDoku;
             const slotGrundentgelt = 100;
@@ -1890,6 +1890,383 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
             expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
             expect(a4_updated.Status).toBe('final_abgelehnt'); 
+
+    });
+
+    it('sollte Slot-Konflikt durch Entgeltvergleich lösen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen (granularer Status)', async () => {
+        // Aktion: Keine Anfrage verzichtet, eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
+        let a1 = await Anfrage.findById(anfragenIds[0]);
+        let a2 = await Anfrage.findById(anfragenIds[1]);
+        let a3 = await Anfrage.findById(anfragenIds[2]);
+        let a4 = await Anfrage.findById(anfragenIds[3]); 
+        
+        a1.Entgelt = 1000; a1.save();
+        a2.Entgelt = 900;  a2.save();
+        a3.Entgelt = 800;  a3.save();
+        a4.Entgelt = 700;  a4.save();
+
+        let response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        let aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_entgelt');
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/entgeltvergleich`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('geloest');
+        expect(aktualisierteKonfliktDoku.abschlussdatum).toBeDefined();            
+            
+        const zugewieseneIdsKonflikt = aktualisierteKonfliktDoku.zugewieseneAnfragen.map(id => id.toString());
+        expect(zugewieseneIdsKonflikt).toHaveLength(1);
+        expect(zugewieseneIdsKonflikt).toContain(a1._id.toString());
+
+        const abgelehnteIdsKonflikt = aktualisierteKonfliktDoku.abgelehnteAnfragenEntgeltvergleich.map(id => id.toString());
+        expect(abgelehnteIdsKonflikt).toHaveLength(3);
+        expect(abgelehnteIdsKonflikt).toContain(a2._id.toString());
+        expect(abgelehnteIdsKonflikt).toContain(a3._id.toString());
+        expect(abgelehnteIdsKonflikt).toContain(a4._id.toString());
+
+        // Überprüfung der Anfragen-Status und Einzelzuweisungen
+            const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+            const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+            const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+            const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+
+        expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot_entgelt');          
+        expect(a1_updated.Status).toBe('vollstaendig_final_bestaetigt'); 
+
+        expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a2_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a3_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a4_updated.Status).toBe('final_abgelehnt'); 
+
+    });
+
+    it('sollte Slot-Konflikt bei Gleichstand im Entgeltvergleich zum Höchstpreisverfahren überführen', async () => {
+        // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
+        let a1 = await Anfrage.findById(anfragenIds[0]);
+        let a2 = await Anfrage.findById(anfragenIds[1]);
+        let a3 = await Anfrage.findById(anfragenIds[2]);
+        let a4 = await Anfrage.findById(anfragenIds[3]); 
+        
+        a1.Entgelt = 1000; a1.save();
+        a2.Entgelt = 900;  a2.save();
+        a3.Entgelt = 1000; a3.save();
+        a4.Entgelt = 700;  a4.save();
+
+        let response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        let aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_entgelt');
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/entgeltvergleich`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        //console.log(aktualisierteKonfliktDoku);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_hoechstpreis');         
+            
+        const zugewieseneIdsKonflikt = aktualisierteKonfliktDoku.zugewieseneAnfragen.map(id => id.toString());
+        expect(zugewieseneIdsKonflikt).toHaveLength(0);
+
+        const abgelehnteIdsKonflikt = aktualisierteKonfliktDoku.abgelehnteAnfragenEntgeltvergleich.map(id => id.toString());
+        expect(abgelehnteIdsKonflikt).toHaveLength(2);
+        expect(abgelehnteIdsKonflikt).toContain(a2._id.toString());
+        expect(abgelehnteIdsKonflikt).toContain(a4._id.toString());
+
+        // Überprüfung der Anfragen-Status und Einzelzuweisungen
+        const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+        const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+        const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+        const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+
+        expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_hoechstpreis_slot');          
+        expect(a1_updated.Status).toBe('in_konfliktloesung_slot'); 
+
+        expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a2_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_hoechstpreis_slot');          
+        expect(a3_updated.Status).toBe('in_konfliktloesung_slot'); 
+
+        expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a4_updated.Status).toBe('final_abgelehnt'); 
+
+    });
+
+    it('sollte Slot-Konflikt im Höchstpreisverfahren bei eindeutigen Geboten entscheiden', async () => {
+        // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
+        let a1 = await Anfrage.findById(anfragenIds[0]);
+        let a2 = await Anfrage.findById(anfragenIds[1]);
+        let a3 = await Anfrage.findById(anfragenIds[2]);
+        let a4 = await Anfrage.findById(anfragenIds[3]); 
+        
+        a1.Entgelt = 1000; a1.save();
+        a2.Entgelt = 1000; a2.save();
+        a3.Entgelt = 1000; a3.save();
+        a4.Entgelt = 700;  a4.save();
+
+        let response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        let aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_entgelt');
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/entgeltvergleich`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_hoechstpreis');
+        
+        // ---- AKTION: Ergebnisse des Höchstpreisverfahrens senden ----
+        const hoechstpreisPayload = {
+            ListeGeboteHoechstpreis: [
+                { anfrage: a1._id.toString(), gebot: (a1.Entgelt || 0) + 50 }, // Bietet 1050
+                { anfrage: a2._id.toString(), gebot: (a2.Entgelt || 0) + 20 },  // Bietet 1020
+                { anfrage: a3._id.toString(), gebot: (a3.Entgelt || 0) + 70 }  // Bietet 1070
+            ]
+        };
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/hoechstpreis-ergebnis`) // Neuer Endpunkt für Slot-Konflikte
+            .send(hoechstpreisPayload);
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('geloest');
+        expect(aktualisierteKonfliktDoku.abschlussdatum).toBeDefined();    
+            
+        const zugewieseneIdsKonflikt = aktualisierteKonfliktDoku.zugewieseneAnfragen.map(id => id.toString());
+        expect(zugewieseneIdsKonflikt).toHaveLength(1);
+        expect(zugewieseneIdsKonflikt).toContain(a3._id.toString());
+
+        const abgelehnteIdsKonflikt = aktualisierteKonfliktDoku.abgelehnteAnfragenEntgeltvergleich.map(id => id.toString());
+        expect(abgelehnteIdsKonflikt).toHaveLength(1);
+        expect(abgelehnteIdsKonflikt).toContain(a4._id.toString());
+
+        const abgelehnteIdsGebot = aktualisierteKonfliktDoku.abgelehnteAnfragenHoechstpreis.map(id => id.toString());
+        expect(abgelehnteIdsGebot).toHaveLength(2);
+        expect(abgelehnteIdsGebot).toContain(a1._id.toString());
+        expect(abgelehnteIdsGebot).toContain(a2._id.toString());
+
+        // Überprüfung der Anfragen-Status und Einzelzuweisungen
+        const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+        const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+        const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+        const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+
+        expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_hoechstpreis');          
+        expect(a1_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_hoechstpreis');          
+        expect(a2_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot_hoechstpreis');          
+        expect(a3_updated.Status).toBe('vollstaendig_final_bestaetigt'); 
+
+        expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a4_updated.Status).toBe('final_abgelehnt'); 
+
+    });
+
+    it('sollte Slot-Konflikt im Höchstpreisverfahren bei identischen Geboten offen lassen', async () => {
+        // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
+        let a1 = await Anfrage.findById(anfragenIds[0]);
+        let a2 = await Anfrage.findById(anfragenIds[1]);
+        let a3 = await Anfrage.findById(anfragenIds[2]);
+        let a4 = await Anfrage.findById(anfragenIds[3]); 
+        
+        a1.Entgelt = 1000; a1.save();
+        a2.Entgelt = 1000; a2.save();
+        a3.Entgelt = 1000; a3.save();
+        a4.Entgelt = 700;  a4.save();
+
+        let response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        let aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_entgelt');
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/entgeltvergleich`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_hoechstpreis');
+        
+        // ---- AKTION: Ergebnisse des Höchstpreisverfahrens senden ----
+        const hoechstpreisPayload = {
+            ListeGeboteHoechstpreis: [
+                { anfrage: a1._id.toString(), gebot: (a1.Entgelt || 0) + 50 }, // Bietet 1050
+                { anfrage: a2._id.toString(), gebot: (a2.Entgelt || 0) + 20 }, // Bietet 1020
+                { anfrage: a3._id.toString(), gebot: (a3.Entgelt || 0) + 50 }  // Bietet 1050
+            ]
+        };
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/hoechstpreis-ergebnis`) // Neuer Endpunkt für Slot-Konflikte
+            .send(hoechstpreisPayload);
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_hoechstpreis');
+            
+        const zugewieseneIdsKonflikt = aktualisierteKonfliktDoku.zugewieseneAnfragen.map(id => id.toString());
+        expect(zugewieseneIdsKonflikt).toHaveLength(0);
+
+        const abgelehnteIdsKonflikt = aktualisierteKonfliktDoku.abgelehnteAnfragenEntgeltvergleich.map(id => id.toString());
+        expect(abgelehnteIdsKonflikt).toHaveLength(1);
+        expect(abgelehnteIdsKonflikt).toContain(a4._id.toString());
+
+        const abgelehnteIdsGebot = aktualisierteKonfliktDoku.abgelehnteAnfragenHoechstpreis.map(id => id.toString());
+        expect(abgelehnteIdsGebot).toHaveLength(1);
+        expect(abgelehnteIdsGebot).toContain(a2._id.toString());
+
+        // Überprüfung der Anfragen-Status und Einzelzuweisungen
+        const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+        const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+        const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+        const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+
+        expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_hoechstpreis_slot');          
+        expect(a1_updated.Status).toBe('in_konfliktloesung_slot'); 
+
+        expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_hoechstpreis');          
+        expect(a2_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_hoechstpreis_slot');          
+        expect(a3_updated.Status).toBe('in_konfliktloesung_slot'); 
+
+        expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a4_updated.Status).toBe('final_abgelehnt'); 
+
+    });
+
+    it('sollte Slot-Konflikt im Höchstpreisverfahren bei mit ungültigen oder fehlenden Geboten korrekt behandeln', async () => {
+        // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
+        let a1 = await Anfrage.findById(anfragenIds[0]);
+        let a2 = await Anfrage.findById(anfragenIds[1]);
+        let a3 = await Anfrage.findById(anfragenIds[2]);
+        let a4 = await Anfrage.findById(anfragenIds[3]); 
+        
+        a1.Entgelt = 1000; a1.save();
+        a2.Entgelt = 1000; a2.save();
+        a3.Entgelt = 1000; a3.save();
+        a4.Entgelt = 700;  a4.save();
+
+        let response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        let aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_entgelt');
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/entgeltvergleich`) // Neuer Endpunkt für Slot-Konflikte
+            .send();
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('in_bearbeitung_hoechstpreis');
+        
+        // ---- AKTION: Ergebnisse des Höchstpreisverfahrens senden ----
+        const hoechstpreisPayload = {
+            ListeGeboteHoechstpreis: [
+                { anfrage: a1._id.toString(), gebot: (a1.Entgelt || 0) }, // Bietet erneut 1000, also ungültig
+                { anfrage: a2._id.toString(), gebot: (a2.Entgelt || 0) + 20 }, // Bietet 1020
+                //{ anfrage: a3._id.toString(), gebot: (a3.Entgelt || 0) + 50 }  // Bietet gar nicht
+            ]
+        };
+
+        response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/hoechstpreis-ergebnis`) // Neuer Endpunkt für Slot-Konflikte
+            .send(hoechstpreisPayload);
+
+        expect(response.status).toBe(200);
+        aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('geloest');
+        expect(aktualisierteKonfliktDoku.abschlussdatum).toBeDefined();  
+            
+        const zugewieseneIdsKonflikt = aktualisierteKonfliktDoku.zugewieseneAnfragen.map(id => id.toString());
+        expect(zugewieseneIdsKonflikt).toHaveLength(1);
+        expect(zugewieseneIdsKonflikt).toContain(a2._id.toString());
+
+        const abgelehnteIdsKonflikt = aktualisierteKonfliktDoku.abgelehnteAnfragenEntgeltvergleich.map(id => id.toString());
+        expect(abgelehnteIdsKonflikt).toHaveLength(1);
+        expect(abgelehnteIdsKonflikt).toContain(a4._id.toString());
+
+        const abgelehnteIdsGebot = aktualisierteKonfliktDoku.abgelehnteAnfragenHoechstpreis.map(id => id.toString());
+        expect(abgelehnteIdsGebot).toHaveLength(2);
+        expect(abgelehnteIdsGebot).toContain(a1._id.toString());
+        expect(abgelehnteIdsGebot).toContain(a3._id.toString());
+
+        // Überprüfung der Anfragen-Status und Einzelzuweisungen
+        const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+        const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+        const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+        const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+
+        expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_hoechstpreis_ungueltig');          
+        expect(a1_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot_hoechstpreis');          
+        expect(a2_updated.Status).toBe('vollstaendig_final_bestaetigt'); 
+
+        expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_hoechstpreis_kein_gebot');          
+        expect(a3_updated.Status).toBe('final_abgelehnt'); 
+
+        expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_entgelt');          
+        expect(a4_updated.Status).toBe('final_abgelehnt'); 
 
     });
 });

@@ -542,7 +542,7 @@ function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
             // Alle anderen mit geringerem Entgelt werden direkt abgelehnt
             const anfragenMitGeringeremEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt < hoechstesEntgelt);
             for (const anfrageItem of anfragenMitGeringeremEntgelt) {
-                konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.id);
+                konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
                 const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'abgelehnt_slot_entgelt');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
             }
@@ -558,7 +558,7 @@ function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
             // Alle anderen ablehnen
             const verliererAnfragen = konflikt.ReihungEntgelt.slice(1);
             for (const anfrageItem of verliererAnfragen) {
-                konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage);
+                konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
                 const updatedVerlierer = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'abgelehnt_slot_entgelt');
                 if(updatedVerlierer) anfragenToSave.set(updatedVerlierer._id.toString(), updatedVerlierer);
             }
@@ -1655,7 +1655,7 @@ exports.fuehreEinzelSlotEntgeltvergleichDurch = async (req, res) => {
 };
 
 // Phase 3 Controller-Funktion
-// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens
+// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens für einen einzelnen Topf-Konflikt
 // @route   PUT /api/konflikte/:konfliktId/hoechstpreis-ergebnis
 exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
     const { konfliktId } = req.params;
