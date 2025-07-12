@@ -512,9 +512,15 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             .send(updatePayload);
         expect(loesenResponse.status).toBe(200);
         expect(loesenResponse.body.data.gruppe.status).toBe('vollstaendig_geloest');
+
+        //console.log(loesenResponse.body.data.gruppe.konflikteInGruppe[0]);
+
         anfrage1 = await Anfrage.findById(anfrage1._id);
         anfrage2 = await Anfrage.findById(anfrage2._id);
         anfrage3 = await Anfrage.findById(anfrage3._id);
+
+        //console.log(anfrage3);
+
         expect(anfrage1.Status).toBe('vollstaendig_bestaetigt_topf');
         expect(anfrage2.Status).toBe('vollstaendig_bestaetigt_topf');
         expect(anfrage3.Status).toBe('final_abgelehnt');
@@ -683,9 +689,11 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             expect(aktualisierteKonfliktDoku.status).toBe('geloest');
             expect(aktualisierteKonfliktDoku.abschlussdatum).toBeDefined();
 
+            //console.log(aktualisierteKonfliktDoku);
+
             // ReihungEntgelt
             expect(aktualisierteKonfliktDoku.ReihungEntgelt).toHaveLength(3);
-            expect(aktualisierteKonfliktDoku.ReihungEntgelt[0].anfrage.toString()).toBe(anfrageHoch._id.toString());
+            expect(aktualisierteKonfliktDoku.ReihungEntgelt[0].anfrage._id.toString()).toBe(anfrageHoch._id.toString());
             expect(aktualisierteKonfliktDoku.ReihungEntgelt[0].entgelt).toBe(1000);
             
             // Zugewiesene/Abgelehnte Anfragen im Konfliktdokument

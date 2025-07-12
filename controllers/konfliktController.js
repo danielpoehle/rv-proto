@@ -37,25 +37,22 @@ function sindObjectIdArraysGleich(arr1, arr2) {
 /**
  * Aktualisiert den statusEinzelzuweisung für alle Slots einer Anfrage, die zu einem bestimmten Topf gehören,
  * und ruft dann die Methode zur Neuberechnung des Gesamtstatus der Anfrage auf.
- * @param {string|ObjectId} anfrageId - Die ID der zu aktualisierenden Anfrage.
+ * @param {Document} anfrageDoc - Das bereits geladene und populierte Anfrage-Dokument.
  * @param {string} neuerEinzelStatus - Der neue Status für die relevanten Slot-Zuweisungen.
  * @param {ObjectId} ausloesenderTopfObjectId - Die ObjectId des Kapazitätstopfes, für den diese Entscheidung gilt.
  * @returns {Promise<Anfrage|null>} Das aktualisierte Anfrage-Objekt oder null bei Fehler.
  */
-async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, ausloesenderTopfObjectId) {
-    const anfrageDoc = await Anfrage.findById(anfrageId).populate({
-        path: 'ZugewieseneSlots.slot', // Populate das Slot-Objekt innerhalb des Arrays
-        select: 'VerweisAufTopf SlotID_Sprechend' // Nur die benötigten Felder des Slots laden
-    });
+function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloesenderTopfObjectId) {    
 
-    if (!anfrageDoc) {
-        console.warn(`Anfrage ${anfrageId} nicht gefunden beim Versuch, Einzelstatus zu aktualisieren.`);
+    if (!anfrageDoc || !anfrageDoc.ZugewieseneSlots) {
+        console.warn(`Anfrage-Dokument für Update ungültig: ${anfrageDoc?._id} für updateAnfrageSlotsStatusFuerTopf`);
         return null;
     }
 
     let anfrageModifiziert = false;
-    if (anfrageDoc.ZugewieseneSlots && anfrageDoc.ZugewieseneSlots.length > 0) {
+    if (anfrageDoc.ZugewieseneSlots.length > 0) {
         for (const zuweisung of anfrageDoc.ZugewieseneSlots) {
+            // Prüfe, ob der Slot in der Zuweisung zum aktuellen auslösenden Topf gehört
             if (zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(ausloesenderTopfObjectId)) {
                 if (zuweisung.statusEinzelzuweisung !== neuerEinzelStatus) {
                     zuweisung.statusEinzelzuweisung = neuerEinzelStatus;
@@ -66,11 +63,7 @@ async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, au
     }
 
     if (anfrageModifiziert) {
-        anfrageDoc.markModified('ZugewieseneSlots');
-        //console.log(`Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} vorher ${anfrageDoc.Status}`);
-        await anfrageDoc.updateGesamtStatus(); // Methode aus Anfrage-Modell aufrufen
-        await anfrageDoc.save();
-        //console.log(`Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} nachher ${anfrageDoc.Status}`);
+        anfrageDoc.markModified('ZugewieseneSlots');        
         console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} auf ${anfrageDoc.Status} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
     }
     return anfrageDoc;
@@ -80,17 +73,17 @@ async function updateAnfrageSlotsStatusFuerTopf(anfrageId, neuerEinzelStatus, au
 /**
  * Aktualisiert den Status einer EINZELNEN Slot-Zuweisung innerhalb einer Anfrage.
  * und ruft dann die Methode zur Neuberechnung des Gesamtstatus der Anfrage auf.
- * @param {ObjectId|string} anfrageId
+ * @param {Document} anfrageDoc - Das bereits geladene und ggf. populierte Anfrage-Dokument.
  * @param {ObjectId|string} slotId - Der Slot, dessen Zuweisungsstatus geändert wird.
  * @param {string} neuerStatus - Der neue statusEinzelzuweisung
+ * @returns Promise<Anfrage|null>} Das aktualisierte Anfrage-Objekt oder null bei Fehler.
  */
-async function updateAnfrageEinzelSlotStatus(anfrageId, slotId, neuerStatus) {
-    const anfrage = await Anfrage.findById(anfrageId);
-    if (!anfrage || !anfrage.ZugewieseneSlots) return;
+function updateAnfrageEinzelSlotStatus(anfrageDoc, slotId, neuerStatus) {    
+    if (!anfrageDoc || !anfrageDoc.ZugewieseneSlots) return null;
 
     let anfrageModifiziert = false;
-    for (const zuweisung of anfrage.ZugewieseneSlots) {
-        if (zuweisung.slot.equals(slotId)) {
+    for (const zuweisung of anfrageDoc.ZugewieseneSlots) {
+        if (zuweisung.slot && zuweisung.slot._id.equals(slotId)) {
             if (zuweisung.statusEinzelzuweisung !== neuerStatus) {
                 zuweisung.statusEinzelzuweisung = neuerStatus;
                 anfrageModifiziert = true;
@@ -100,11 +93,10 @@ async function updateAnfrageEinzelSlotStatus(anfrageId, slotId, neuerStatus) {
     }
 
     if (anfrageModifiziert) {
-        anfrage.markModified('ZugewieseneSlots');
-        await anfrage.updateGesamtStatus();
-        await anfrage.save();
-        console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrage.AnfrageID_Sprechend || anfrage._id} auf ${anfrage.Status} aktualisiert (neuer Einzelstatus für Slot ${slotId}: ${neuerStatus}).`);
+        anfrageDoc.markModified('ZugewieseneSlots');
+        console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} auf ${anfrageDoc.Status} aktualisiert (neuer Einzelstatus für Slot ${slotId}: ${neuerStatus}).`);
     }
+    return anfrageDoc;
 }
 
 /**
@@ -115,13 +107,15 @@ async function updateAnfrageEinzelSlotStatus(anfrageId, slotId, neuerStatus) {
  * @param {Array} listeAnfragenVerschubKoordination - Array von {anfrage, details} Objekten.
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten, die gespeichert werden müssen.
  */
-async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
+function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
     if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF' || !konflikt.ausloesenderKapazitaetstopf) {
         throw new Error('Diese Funktion ist nur für Topf-Konflikte mit einem auslösenden Kapazitätstopf vorgesehen.');
     }
 
     const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
     let anfragenToSave = new Map(); // Sammelt modifizierte Anfrage-Dokumente, um doppeltes Speichern zu vermeiden
+
+    console.log(konflikt);
 
     // Verzicht verarbeiten
     if (listeAnfragenMitVerzicht && Array.isArray(listeAnfragenMitVerzicht)) {
@@ -130,8 +124,12 @@ async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfra
         );
         konflikt.markModified('ListeAnfragenMitVerzicht');
         for (const anfrageId of konflikt.ListeAnfragenMitVerzicht) {
-            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_verzichtet', ausloesenderTopfId);
-            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            const anfrageDoc = konflikt.beteiligteAnfragen.find(a => a._id.equals(anfrageId));
+            //console.log(`anfrageId ${anfrageId} \n\nkonflikt.beteiligteAnfragen ${konflikt.beteiligteAnfragen} \n\nanfrageDoc ${anfrageDoc}`);
+            if (anfrageDoc) {
+                const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageDoc, 'abgelehnt_topf_verzichtet', ausloesenderTopfId);
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }            
         }
     }
 
@@ -141,8 +139,11 @@ async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfra
         konflikt.markModified('ListeAnfragenVerschubKoordination');
         for (const item of konflikt.ListeAnfragenVerschubKoordination) {
             // Annahme: 'abgelehnt_topf_verschoben' für DIESEN Konfliktpunkt, da die Anfrage eine Alternative hat
-            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(item.anfrage, 'abgelehnt_topf_verschoben', ausloesenderTopfId);
-            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            const anfrageDoc = konflikt.beteiligteAnfragen.find(a => a._id.equals(item.anfrage));            
+            if (anfrageDoc) {                
+                const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageDoc, 'abgelehnt_topf_verschoben', ausloesenderTopfId);
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }            
         }
     }
 
@@ -170,9 +171,8 @@ async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfra
         konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub automatisch gelöst.`;
 
         for (const anfrageDoc of aktiveAnfragenImKonflikt) {
-            const updatedAnfrage =  await updateAnfrageSlotsStatusFuerTopf(anfrageDoc._id, 'bestaetigt_topf', ausloesenderTopfId);
+            const updatedAnfrage =  updateAnfrageSlotsStatusFuerTopf(anfrageDoc, 'bestaetigt_topf', ausloesenderTopfId);
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
-            anfrageDoc.markModified
         }
         console.log(`Topf-Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
     } else {
@@ -181,9 +181,8 @@ async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfra
         konflikt.zugewieseneAnfragen = []; // Noch keine finale Zuweisung in diesem Schritt
         konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Konflikt am ${new Date().toLocaleString()} nach Verzicht/Verschub nicht gelöst. Nächster Schritt: Entgeltvergleich.`;
         for (const anfrageDoc of aktiveAnfragenImKonflikt) {
-            const updatedAnfrage =  await updateAnfrageSlotsStatusFuerTopf(anfrageDoc._id, 'wartet_entgeltentscheidung_topf', ausloesenderTopfId);
+            const updatedAnfrage =  updateAnfrageSlotsStatusFuerTopf(anfrageDoc, 'wartet_entgeltentscheidung_topf', ausloesenderTopfId);
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
-            anfrageDoc.markModified
         }
         console.log(`Topf-Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
     }
@@ -204,7 +203,7 @@ async function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfra
  * @param {Array} listeAnfragenVerschubKoordination - Array von {anfrage, details} Objekten.
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
  */
-async function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
+function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfragenMitVerzicht = [], listeAnfragenVerschubKoordination = []) {
     if (konflikt.konfliktTyp !== 'SLOT' || !konflikt.ausloesenderSlot) {
         throw new Error('Diese Funktion ist nur für Slot-Konflikte mit einem auslösenden Slot vorgesehen.');
     }
@@ -220,12 +219,18 @@ async function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfra
     // Aktualisiere Einzelstatus der Anfragen, die verzichtet oder verschoben wurden
     for (const anfrageId of konflikt.ListeAnfragenMitVerzicht) {
         // Wichtig: Wir nutzen hier die spezialisierte Funktion, die nur den EINEN Slot-Status ändert!
-        const updatedAnfrage = await updateAnfrageEinzelSlotStatus(anfrageId, ausloesenderSlotId, 'abgelehnt_slot_verzichtet');
-        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        const anfrageDoc = konflikt.beteiligteAnfragen.find(a => a._id.equals(anfrageId));
+        if(anfrageDoc){
+            const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageDoc, ausloesenderSlotId, 'abgelehnt_slot_verzichtet');
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }        
     }
     for (const item of konflikt.ListeAnfragenVerschubKoordination) {
-        const updatedAnfrage = await updateAnfrageEinzelSlotStatus(item.anfrage, ausloesenderSlotId, 'abgelehnt_slot_verschoben');
-        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        const anfrageDoc = konflikt.beteiligteAnfragen.find(a => a._id.equals(item.anfrage));
+        if(anfrageDoc){
+            const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageDoc, ausloesenderSlotId, 'abgelehnt_slot_verschoben');
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }        
     }
     
     // Ermittle "aktive" Anfragen, die noch um den Slot konkurrieren
@@ -257,7 +262,7 @@ async function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfra
             const gewinnerAnfrage = aktiveAnfragenImKonflikt[0];
             // Hier könnte ein finaler Status wie 'bestaetigt_final' gesetzt werden,
             // aber für Konsistenz nutzen wir 'bestaetigt_slot'.
-            const updatedAnfrage = await updateAnfrageEinzelSlotStatus(gewinnerAnfrage._id, ausloesenderSlotId, 'bestaetigt_slot');
+            const updatedAnfrage = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot');
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
         }
         console.log(`Slot-Konflikt ${konflikt._id} automatisch nach Verzicht/Verschub gelöst.`);
@@ -270,7 +275,7 @@ async function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfra
         
         // Setze den Status der verbleibenden Anfragen auf "wartet auf Entgeltentscheidung für Slot"
         for (const anfrageDoc of aktiveAnfragenImKonflikt) {
-            const updatedAnfrage = await updateAnfrageEinzelSlotStatus(anfrageDoc._id, ausloesenderSlotId, 'wartet_entgeltentscheidung_slot');
+            const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageDoc, ausloesenderSlotId, 'wartet_entgeltentscheidung_slot');
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
         }
         console.log(`Slot-Konflikt ${konflikt._id} nach Verzicht/Verschub nicht gelöst, Status: ${konflikt.status}.`);
@@ -286,13 +291,16 @@ async function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfra
 }
 
 /**
- * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
+ * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts für einen Kapazitätstopf
  * in der Phase "Entgeltvergleich". Modifiziert Dokumente im Speicher.
- * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
+ * @param {Document} konflikt - Das voll populierte Topf-KonfliktDokumentation-Objekt.
  * @param {Array} [evuReihungen=[]] - Optionale, vom Koordinator übermittelte Reihung für EVUs.
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
  */
-async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen = {}) {
+function resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen = {}) {
+        if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF' || !konflikt.ausloesenderKapazitaetstopf) {
+            throw new Error('Diese Funktion ist nur für Topf-Konflikte vorgesehen.');
+        }
         //console.log(konflikt);
         const ausloesenderTopf = konflikt.ausloesenderKapazitaetstopf; // Ist bereits populiert
         const ausloesenderTopfId = ausloesenderTopf._id;
@@ -358,7 +366,7 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
                         konflikt.abgelehnteAnfragenMarktanteil.push(anfrage._id); // Diese wird wegen EVU-Reihung abgelehnt
                         console.log(`Anfrage ${anfrage.AnfrageID_Sprechend} von ${anfrage.EVU} wegen Marktanteil-Limit (${evuMarktanteilLimit}) abgelehnt.`);
                         konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${anfrage.AnfrageID_Sprechend} von ${anfrage.EVU} wegen Marktanteil-Limit (${evuMarktanteilLimit}) abgelehnt.`;
-                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'abgelehnt_topf_marktanteil', ausloesenderTopfId);
+                        let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'abgelehnt_topf_marktanteil', ausloesenderTopfId);
                         if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
                     }
                 }
@@ -372,19 +380,19 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
         konflikt.markModified('abgelehnteAnfragenMarktanteil');        
         
         // ----- PHASE 2b - EVU-übergreifender Entgeltvergleich (mit der bereinigten Liste) -----
-        console.log(`Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
+        console.log(`Topf-Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragenFuerEntgeltvergleich.length} Anfragen.`);
 
         // ReihungEntgelt automatisch erstellen und sortieren
         konflikt.ReihungEntgelt = aktiveAnfragenFuerEntgeltvergleich
             .map(anfr => ({
-                anfrage: anfr._id,
+                anfrage: anfr,
                 entgelt: anfr.Entgelt || 0, // Nutze das in der Anfrage gespeicherte Entgelt                
             }))
             .sort((a, b) => (b.entgelt || 0) - (a.entgelt || 0)); // Absteigend nach Entgelt
 
         konflikt.ReihungEntgelt.forEach((item, index) => item.rang = index + 1);
         konflikt.markModified('ReihungEntgelt');
-        console.log(`Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
+        console.log(`Topf-Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
 
         // Felder für Zuweisung/Ablehnung zurücksetzen, bevor sie neu befüllt werden
         konflikt.zugewieseneAnfragen = [];
@@ -411,8 +419,8 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
                 // **Fall 1: Der gesamte Block passt noch in die Kapazität.**
                 // Alle Anfragen in diesem Block werden zugewiesen.
                 for (const anfrageItem of blockMitGleichemEntgelt) {
-                    konflikt.zugewieseneAnfragen.push(anfrageItem.anfrage);
-                    let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
+                    konflikt.zugewieseneAnfragen.push(anfrageItem.anfrage._id);
+                    let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
                     if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
                 }
             } else {
@@ -426,9 +434,9 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
                 // entweder Kandidaten für HP oder direkt abgelehnt.
                 // Die Schleife kann hier beendet werden, der Rest wird abgelehnt.
                 for (const anfrageItem of blockMitGleichemEntgelt) {
-                    if (!anfragenFuerHoechstpreis.some(id => id.equals(anfrageItem.anfrage))) {
-                        konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage);
-                        let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+                    if (!anfragenFuerHoechstpreis.some(anf => (anf._id).equals(anfrageItem.anfrage._id))) {
+                        konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
+                        let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
                         if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
                     }
                 }
@@ -441,8 +449,8 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
             if (anfragenFuerHoechstpreis.length > 0) {
                 const restlicheAnfragen = konflikt.ReihungEntgelt.slice(verarbeiteteAnfragenIndex);
                 for (const anfrageItem of restlicheAnfragen) {
-                    konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage);
-                    let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
+                    konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
+                    let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
                     if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
                 }
                 break; // Schleife beenden
@@ -452,8 +460,8 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
         // Setze finalen Status für diesen Schritt
         if (anfragenFuerHoechstpreis.length > 0) {
             konflikt.status = 'in_bearbeitung_hoechstpreis';
-            for (const anfrageId of anfragenFuerHoechstpreis) {
-                let updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
+            for (const anfrage of anfragenFuerHoechstpreis) {
+                let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
             }
             konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Entgeltvergleich am ${new Date().toLocaleString()} führte zu Gleichstand. Höchstpreisverfahren für ${anfragenFuerHoechstpreis.length} Anfragen eingeleitet.`;
@@ -471,13 +479,113 @@ async function resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen =
 };
 
 /**
+ * Service-Funktion: Führt den Entgeltvergleich für einen EINZELNEN SLOT-Konflikt durch.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt (Typ SLOT).
+ * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
+ */
+function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
+    if (konflikt.konfliktTyp !== 'SLOT' || !konflikt.ausloesenderSlot) {
+        throw new Error('Diese Funktion ist nur für Slot-Konflikte vorgesehen.');
+    }
+
+    const ausloesenderSlotId = konflikt.ausloesenderSlot._id;
+    let anfragenToSave = new Map();
+    const maxKapazitaetSlot = 1; // Kapazität eines Slots ist immer 1
+    
+
+    // Aktive Anfragen für diesen Slot-Konflikt ermitteln
+    const anfragenIdsMitVerzicht = new Set((konflikt.ListeAnfragenMitVerzicht || []).map(id => id.toString()));
+    const anfragenIdsMitVerschub = new Set((konflikt.ListeAnfragenVerschubKoordination || []).map(item => item.anfrage.toString()));
+    
+    const aktiveAnfragen = konflikt.beteiligteAnfragen.filter(anfrageDoc => 
+        !anfragenIdsMitVerzicht.has(anfrageDoc._id.toString()) && 
+        !anfragenIdsMitVerschub.has(anfrageDoc._id.toString())
+    );
+    console.log(`Slot-Konflikt ${konflikt._id}: Entgeltvergleich wird durchgeführt für ${aktiveAnfragen.length} Anfragen.`);
+
+
+    // ReihungEntgelt automatisch erstellen und sortieren
+    konflikt.ReihungEntgelt = aktiveAnfragen
+        .map(anfr => ({
+            id: anfr._id,
+            anfrage: anfr,
+            entgelt: anfr.Entgelt || 0,
+        }))
+        .sort((a, b) => (b.entgelt || 0) - (a.entgelt || 0));
+    
+    konflikt.ReihungEntgelt.forEach((item, index) => item.rang = index + 1);
+    konflikt.markModified('ReihungEntgelt');
+    console.log(`Slot-Konflikt ${konflikt._id}: ReihungEntgelt automatisch erstellt mit ${konflikt.ReihungEntgelt.length} Einträgen.`);
+
+
+    // Felder für Zuweisung/Ablehnung zurücksetzen
+    konflikt.zugewieseneAnfragen = [];
+    konflikt.abgelehnteAnfragenEntgeltvergleich = [];
+    konflikt.abgelehnteAnfragenHoechstpreis = [];
+            
+    // Zuweisung basierend auf der Reihung
+    if (konflikt.ReihungEntgelt.length === 0) {
+        // Keine aktiven Anfragen mehr übrig
+        konflikt.status = 'geloest';
+        konflikt.abschlussdatum = new Date();
+    } else {
+        const hoechstesEntgelt = konflikt.ReihungEntgelt[0].entgelt;
+        const kandidatenMitHoechstemEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt === hoechstesEntgelt);
+
+        if (kandidatenMitHoechstemEntgelt.length > maxKapazitaetSlot) {
+            // **Fall 1: Gleichstand an der Spitze -> Höchstpreisverfahren**
+            konflikt.status = 'in_bearbeitung_hoechstpreis';
+            for (const anfrageItem of kandidatenMitHoechstemEntgelt) {
+                const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'wartet_hoechstpreis_slot');
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+            // Alle anderen mit geringerem Entgelt werden direkt abgelehnt
+            const anfragenMitGeringeremEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt < hoechstesEntgelt);
+            for (const anfrageItem of anfragenMitGeringeremEntgelt) {
+                konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.id);
+                const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'abgelehnt_slot_entgelt');
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Entgeltvergleich am ${new Date().toLocaleString()} führte zu Gleichstand. Höchstpreisverfahren für ${kandidatenMitHoechstemEntgelt.length} Anfragen eingeleitet.`;
+
+        } else {
+            // **Fall 2: Eindeutiger Gewinner -> Konflikt gelöst**
+            const gewinnerAnfrage = konflikt.ReihungEntgelt[0].anfrage;
+            konflikt.zugewieseneAnfragen.push(gewinnerAnfrage._id);
+            const updatedGewinner = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot_entgelt');
+            if(updatedGewinner) anfragenToSave.set(updatedGewinner._id.toString(), updatedGewinner);
+
+            // Alle anderen ablehnen
+            const verliererAnfragen = konflikt.ReihungEntgelt.slice(1);
+            for (const anfrageItem of verliererAnfragen) {
+                konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage);
+                const updatedVerlierer = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'abgelehnt_slot_entgelt');
+                if(updatedVerlierer) anfragenToSave.set(updatedVerlierer._id.toString(), updatedVerlierer);
+            }
+            konflikt.status = 'geloest';
+            konflikt.abschlussdatum = new Date();
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Slot-Konflikt durch Entgeltvergleich am ${new Date().toLocaleString()} gelöst.`;
+
+        }
+    }
+    
+    konflikt.markModified('zugewieseneAnfragen');
+    konflikt.markModified('abgelehnteAnfragenEntgeltvergleich');
+
+    return { anfragenToSave };
+}
+
+/**
  * Service-Funktion: Enthält die Kernlogik zur Lösung eines Einzelkonflikts
  * in der Phase "Höchstpreisverfahren". Modifiziert Dokumente im Speicher.
  * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt.
  * @param {Array} listeGeboteHoechstpreis - Array von {anfrage, gebot} Objekten aus dem Request.
  * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
  */
-async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechstpreis = []) {
+function resolveHoechstpreisForSingleTopfConflict(konflikt, listeGeboteHoechstpreis = []) {
+    if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF' || !konflikt.ausloesenderKapazitaetstopf) {
+            throw new Error('Diese Funktion ist nur für Topf-Konflikte vorgesehen.');
+        }
     //console.log(listeGeboteHoechstpreis);
     konflikt.ListeGeboteHoechstpreis = listeGeboteHoechstpreis; // Speichere alle eingegangenen Gebote
     konflikt.markModified('ListeGeboteHoechstpreis');
@@ -510,15 +618,15 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
         //console.log(gebotEingang);
         if (gebotEingang && typeof gebotEingang.gebot === 'number') {
             if (gebotEingang.gebot > (anfrageKandidat.Entgelt || 0)) {
-                valideGebote.push({ anfrage: anfrageKandidat._id, gebot: gebotEingang.gebot });
+                valideGebote.push({ anfrage: anfrageKandidat, gebot: gebotEingang.gebot });
             } else {
                 anfragenOhneValidesGebot.push(anfrageKandidat._id);
-                const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageKandidat._id, 'abgelehnt_topf_hoechstpreis_ungueltig', ausloesenderTopfId);
+                const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageKandidat, 'abgelehnt_topf_hoechstpreis_ungueltig', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
             }
         } else {
             anfragenOhneValidesGebot.push(anfrageKandidat._id);
-            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageKandidat._id, 'abgelehnt_topf_hoechstpreis_kein_gebot', ausloesenderTopfId);
+            const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageKandidat, 'abgelehnt_topf_hoechstpreis_kein_gebot', ausloesenderTopfId);
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
         }
     }
@@ -547,7 +655,7 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
     // 3. Valide Gebote verarbeiten
     for (let i = 0; i < valideGebote.length; i++) {
         const aktuellesGebot = valideGebote[i];
-        const anfrageId = aktuellesGebot.anfrage;
+        const anfrage = aktuellesGebot.anfrage;
 
         if (verbleibendeKapFuerHP > 0) {
             let istGleichstandAnGrenzeUndUnaufloesbar = false;
@@ -560,7 +668,7 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
 
             if (istGleichstandAnGrenzeUndUnaufloesbar) {
                 valideGebote.filter(g => g.gebot === aktuellesGebot.gebot).forEach(gEqual => {
-                    if (!verbleibenImWartestatusHP.some(id => id.equals(gEqual.anfrage))) {
+                    if (!verbleibenImWartestatusHP.some(anf => (anf._id).equals(gEqual.anfrage._id))) {
                         verbleibenImWartestatusHP.push(gEqual.anfrage);
                     }
                 });
@@ -569,15 +677,15 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
                 const naechstesAnderesGebotIndex = valideGebote.findIndex(g => g.gebot < aktuellesGebot.gebot);
                 i = (naechstesAnderesGebotIndex === -1) ? valideGebote.length -1 : naechstesAnderesGebotIndex -1;
             } else { // Eindeutig gewonnen oder Gleichstand, der noch reinpasst
-                neuZugewiesenInHP.push(anfrageId);
-                const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'bestaetigt_topf_hoechstpreis', ausloesenderTopfId);
+                neuZugewiesenInHP.push(anfrage._id);
+                const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf_hoechstpreis', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
                 verbleibendeKapFuerHP--;
             }
         } else { // Keine Kapazität mehr
-            if (!verbleibenImWartestatusHP.some(idW => idW.equals(anfrageId))) {
-                neuAbgelehntInHPWegenKap.push(anfrageId);
-                const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'abgelehnt_topf_hoechstpreis', ausloesenderTopfId);
+            if (!verbleibenImWartestatusHP.some(idW => (idW._id).equals(anfrage._id))) {
+                neuAbgelehntInHPWegenKap.push(anfrage._id);
+                const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'abgelehnt_topf_hoechstpreis', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
             }
         }
@@ -594,8 +702,8 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
     if (verbleibenImWartestatusHP.length > 0) {
         konflikt.status = 'in_bearbeitung_hoechstpreis'; // Bleibt für nächste Runde
         konflikt.notizen = `${konflikt.notizen || ''}\nHP-Runde (${new Date().toLocaleString()}): Erneuter Gleichstand für ${verbleibenImWartestatusHP.length} Anfragen. Nächste Bieterrunde erforderlich. Zugewiesen: ${neuZugewiesenInHP.length}, Abgelehnt wg. Kap: ${neuAbgelehntInHPWegenKap.length}, Ungült./Kein Gebot: ${anfragenOhneValidesGebot.length}.`;
-        for (const anfrageId of verbleibenImWartestatusHP) { // Status der Wartenden explizit setzen/bestätigen
-            const updatedAnfrage = await updateAnfrageSlotsStatusFuerTopf(anfrageId, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
+        for (const anfrage of verbleibenImWartestatusHP) { // Status der Wartenden explizit setzen/bestätigen
+            const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
         }
     } else {
@@ -605,6 +713,114 @@ async function resolveHoechstpreisForSingleConflict(konflikt, listeGeboteHoechst
     }
 
     return {anfragenToSave};
+}
+
+/**
+ * Service-Funktion: Führt das Höchstpreisverfahren für einen EINZELNEN SLOT-Konflikt durch.
+ * @param {Document} konflikt - Das voll populierte KonfliktDokumentation-Objekt (Typ SLOT).
+ * @param {Array} listeGeboteHoechstpreis - Array von {anfrage, gebot} Objekten aus dem Request.
+ * @returns {Promise<{anfragenToSave: Map<string, Document>}>} Ein Objekt mit einer Map von modifizierten Anfrage-Dokumenten.
+ */
+function resolveHoechstpreisForSingleSlotConflict(konflikt, listeGeboteHoechstpreis = []) {
+    if (konflikt.konfliktTyp !== 'SLOT' || !konflikt.ausloesenderSlot) {
+        throw new Error('Diese Funktion ist nur für Slot-Konflikte vorgesehen.');
+    }
+    
+    konflikt.ListeGeboteHoechstpreis = listeGeboteHoechstpreis;
+    konflikt.markModified('ListeGeboteHoechstpreis');
+
+    const ausloesenderSlotId = konflikt.ausloesenderSlot._id;
+    let anfragenToSave = new Map();
+
+    // 1. Kandidaten identifizieren und Gebote validieren
+    const anfragenKandidaten = konflikt.beteiligteAnfragen.filter(aDoc =>
+        aDoc.ZugewieseneSlots.some(zs => zs.statusEinzelzuweisung === 'wartet_hoechstpreis_slot' && zs.slot?._id.equals(ausloesenderSlotId))
+    );
+
+    let valideGebote = [];
+    konflikt.abgelehnteAnfragenHoechstpreis = []; // Liste für diese Runde zurücksetzen
+
+    for (const anfrageKandidat of anfragenKandidaten) {
+        const gebotEingang = listeGeboteHoechstpreis.find(
+            g => g.anfrage && g.anfrage.toString() === anfrageKandidat._id.toString()
+        );
+        if (gebotEingang && typeof gebotEingang.gebot === 'number') {
+            if (gebotEingang.gebot > (anfrageKandidat.Entgelt || 0)) {
+                valideGebote.push({ anfrage: anfrageKandidat, gebot: gebotEingang.gebot });
+            } else {
+                konflikt.abgelehnteAnfragenHoechstpreis.push(anfrageKandidat._id);
+                let updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageKandidat, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis_ungueltig');
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+        } else {
+            konflikt.abgelehnteAnfragenHoechstpreis.push(anfrageKandidat._id);
+            let updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageKandidat, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis_kein_gebot');
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        }
+    }
+    konflikt.markModified('abgelehnteAnfragenHoechstpreis');
+    
+    valideGebote.sort((a, b) => (b.gebot || 0) - (a.gebot || 0));
+
+    // 2. Gebote verarbeiten
+    konflikt.zugewieseneAnfragen = []; // Für diese Phase zurücksetzen
+    let anfragenInWarteschleifeHP = [];
+
+    if (valideGebote.length === 0) {
+        // Kein einziges valides Gebot abgegeben. Alle Kandidaten wurden bereits als abgelehnt markiert.
+        konflikt.status = 'geloest'; // Der Konflikt ist gelöst, da niemand den Slot bekommt.
+        konflikt.abschlussdatum = new Date();
+    } else if (valideGebote.length === 1) {
+        // **Fall 1: Nur ein valides Gebot.** Eindeutiger Gewinner.
+        const gewinnerAnfrage = valideGebote[0].anfrage;
+        konflikt.zugewieseneAnfragen.push(gewinnerAnfrage._id);
+        let updatedAnfrage = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot_hoechstpreis');
+        if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        konflikt.status = 'geloest';
+        konflikt.abschlussdatum = new Date();
+    } else { // Mehr als ein valides Gebot
+        const hoechstesGebot = valideGebote[0].gebot;
+        const anzahlMitHoechstemGebot = valideGebote.filter(g => g.gebot === hoechstesGebot).length;
+
+        if (anzahlMitHoechstemGebot > 1) {
+            // **Fall 2: Gleichstand an der Spitze.**
+            konflikt.status = 'in_bearbeitung_hoechstpreis'; // Bleibt für nächste Runde
+            const kandidatenFuerNaechsteRunde = valideGebote.filter(g => g.gebot === hoechstesGebot);
+            const verliererDieserRunde = valideGebote.filter(g => g.gebot < hoechstesGebot);
+            
+            for (const kandidat of kandidatenFuerNaechsteRunde) {
+                anfragenInWarteschleifeHP.push(kandidat.anfrage._id);
+                let updatedAnfrage = updateAnfrageEinzelSlotStatus(kandidat.anfrage, ausloesenderSlotId, 'wartet_hoechstpreis_slot');
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+            for (const verlierer of verliererDieserRunde) {
+                konflikt.abgelehnteAnfragenHoechstpreis.push(verlierer.anfrage._id);
+                let updatedAnfrage = updateAnfrageEinzelSlotStatus(verlierer.anfrage, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis');
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+        } else {
+            // **Fall 3: Eindeutiger Höchstbietender.**
+            const gewinnerAnfrage = valideGebote[0].anfrage;
+            konflikt.zugewieseneAnfragen.push(gewinnerAnfrage._id);
+            let updatedAnfrage = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot_hoechstpreis');
+            if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            
+            // Alle anderen mit validen Geboten werden abgelehnt
+            const verliererAnfragen = valideGebote.slice(1);
+            for (const verlierer of verliererAnfragen) {
+                konflikt.abgelehnteAnfragenHoechstpreis.push(verlierer.anfrage._id);
+                let updatedAnfrage = updateAnfrageEinzelSlotStatus(verlierer.anfrage, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis');
+                if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            }
+            konflikt.status = 'geloest';
+            konflikt.abschlussdatum = new Date();
+        }
+    }
+    
+    konflikt.markModified('zugewieseneAnfragen');
+    konflikt.markModified('abgelehnteAnfragenHoechstpreis');
+    
+    return { anfragenToSave };
 }
 
 
@@ -645,7 +861,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
         const alleToepfe = await Kapazitaetstopf.find({})
             .populate({
                 path: 'ListeDerAnfragen',
-                select: '_id AnfrageID_Sprechend Status Entgelt ZugewieseneSlots',
+                select: '_id AnfrageID_Sprechend Status Entgelt ZugewieseneSlots EVU Zugnummer',
                 populate: {
                     path: 'ZugewieseneSlots.slot',
                     model: 'Slot',
@@ -659,6 +875,8 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
         let unveraenderteBestehendeKonflikte = [];
         let autoGeloesteKonflikte = []; // Um aufzulisten, welche Konflikte sich von selbst gelöst haben
         let toepfeOhneKonflikt = [];
+
+        let anfragenToSave = new Map();
 
         for (const topf of alleToepfe) {
             // --- Intelligente Zählung der Belegung des Topfes ---
@@ -699,7 +917,8 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                         
                         // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                         for (const anfrage of topf.ListeDerAnfragen) {
-                            await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'wartet_konflikt_topf', topf._id);
+                            await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id);
+                            anfragenToSave.set(anfrage._id.toString(), anfrage);
                         }
                     } else { // Anfragen im Topf sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist
                         console.log(`Konfliktdokument ${konfliktDoku._id} für Topf ${topf.TopfID}: Beteiligte Anfragen sind identisch. Status (${konfliktDoku.status}) bleibt erhalten.`);
@@ -718,7 +937,8 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     
                     // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                     for (const anfrage of topf.ListeDerAnfragen) {
-                        await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'wartet_konflikt_topf', topf._id);
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id);
+                        anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
 
                     console.log(`Neues Konfliktdokument ${neuesKonfliktDoku._id} für Topf ${topf.TopfID} erstellt.`);
@@ -734,7 +954,8 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                 if(offenerKonflikt && offenerKonflikt.status !== 'geloest'){
                     // Alle Anfragen in diesem Topf sind für die Slots dieses Topfes "bestätigt" (auf Topf-Ebene)
                     for (const anfrage of topf.ListeDerAnfragen) {
-                        await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'bestaetigt_topf', topf._id);
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id);
+                        anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Konflikt ${offenerKonflikt._id} für Topf ${topf.TopfID} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
                     offenerKonflikt.status = 'geloest';
@@ -748,12 +969,19 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                 // Wenn keine Konfliktdoku existiert, dann war der Topf nie überbucht und kann gelöst werden
                 if(!offenerKonflikt){
                     for (const anfrage of topf.ListeDerAnfragen) {
-                        await updateAnfrageSlotsStatusFuerTopf(anfrage._id, 'bestaetigt_topf', topf._id);
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id);
+                        anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Topf ${topf.TopfID} hatte keinen Konflikt und die Anfragen werden automatisch auf 'bestaetigt_topf' gesetzt, da keine Überbuchung besteht.`);
 
                 }
             }
+        }
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
         }
 
         // AM ENDE der Funktion: Rufe die Service-Funktion auf, um die Gruppen zu synchronisieren
@@ -797,7 +1025,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
         const alleSlots = await Slot.find({})
             .populate({
                 path: 'zugewieseneAnfragen', // Anfragen, die diesen Slot wollen
-                select: 'ZugewieseneSlots Status', // Für die Status-Prüfung der Anfrage
+                select: 'ZugewieseneSlots Status Zugnummer EVU', // Für die Status-Prüfung der Anfrage
                 populate: {
                     path: 'ZugewieseneSlots.slot',
                     model: 'Slot',
@@ -825,7 +1053,9 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
             'bestaetigt_slot_nachgerueckt'
         ];
 
-        for (const slot of alleSlots) {
+        let anfragenToSave = new Map();
+
+        for (const slot of alleSlots) {            
             // 3. Ermittle "aktive" Anfragen für DIESEN Slot
             const aktiveAnfragenFuerSlot = slot.zugewieseneAnfragen.filter(anfrage => {
                 // Finde die spezifische Zuweisung dieses Slots in der Anfrage
@@ -874,7 +1104,8 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                         
                         // Alle Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_slot'
                         for (const anfrage of aktiveAnfragenFuerSlot) {
-                            await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'wartet_konflikt_slot');
+                            await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot');
+                            anfragenToSave.set(anfrage._id.toString(), anfrage);
                         }
                     }else { // Anfragen im Slot sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist
                         console.log(`Konfliktdokument ${konfliktDoku._id} für Slot ${slot.SlotID_Sprechend || slot._id}: Beteiligte Anfragen sind identisch. Status (${konfliktDoku.status}) bleibt erhalten.`);
@@ -893,7 +1124,8 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
 
                     // Alle aktiven Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                     for (const anfrage of aktiveAnfragenFuerSlot) {
-                        await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'wartet_konflikt_slot');
+                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot');
+                        anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
 
                     console.log(`Neues Konfliktdokument ${neuesKonfliktDoku._id} für Slot ${slot.SlotID_Sprechend || slot._id} erstellt. ${aktiveAnfragenFuerSlot.length} Anfragen bei max. Kapazität von 1.`);
@@ -910,7 +1142,8 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 if(offenerKonflikt && offenerKonflikt.status !== 'geloest'){
                     // Die eine aktive Anfrage in diesem Slot wird "bestätigt" (auf Slot-Ebene)
                     for (const anfrage of aktiveAnfragenFuerSlot) {
-                        await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'bestaetigt_slot');
+                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'bestaetigt_slot');
+                        anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Konflikt ${offenerKonflikt._id} für Slot ${slot.SlotID_Sprechend || slot._id} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
                     offenerKonflikt.status = 'geloest';
@@ -924,12 +1157,19 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 // Wenn keine Konfliktdoku existiert, dann war der Topf nie überbucht und kann gelöst werden
                 if(!offenerKonflikt){
                     for (const anfrage of aktiveAnfragenFuerSlot) {
-                        await updateAnfrageEinzelSlotStatus(anfrage._id, slot._id, 'bestaetigt_slot');
+                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'bestaetigt_slot');
+                        anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Slot ${slot.SlotID_Sprechend || slot._id} hatte keinen Konflikt und die Anfragen werden automatisch auf 'bestaetigt_slot' gesetzt, da keine Überbuchung besteht.`);
 
                 }
             }
+        }
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
         }
 
         // AM ENDE der Funktion: Rufe die Service-Funktion auf, um die Gruppen zu synchronisieren
@@ -1123,8 +1363,21 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
 
     try {
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
-            .populate('beteiligteAnfragen', '_id Status Entgelt') // Lade _id und Status für Filterung und Entgelt für Info
-            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet TopfID _id');
+        .populate({
+                path: 'ausloesenderKapazitaetstopf',
+                select: 'maxKapazitaet TopfID _id' // Benötigt für den Vergleich
+            })
+            .populate({
+                path: 'beteiligteAnfragen',
+                // Wähle alle Felder, die für die Logik und spätere Updates benötigt werden
+                select: 'AnfrageID_Sprechend EVU Entgelt Status ZugewieseneSlots _id Zugnummer', 
+                // Füge eine verschachtelte Population hinzu, um die Details der zugewiesenen Slots zu bekommen
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf' // Wichtig für den Vergleich in der Helferfunktion
+                }
+            });
 
         if (!konflikt) {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
@@ -1140,7 +1393,7 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
         }
 
         // Rufe die zentrale Service-Funktion auf        
-        const { anfragenToSave } = await resolveVerzichtVerschubForSingleTopfConflict(
+        const { anfragenToSave } = resolveVerzichtVerschubForSingleTopfConflict(
             konflikt,
             ListeAnfragenMitVerzicht,
             ListeAnfragenVerschubKoordination
@@ -1156,6 +1409,10 @@ exports.verarbeiteVerzichtVerschub = async (req, res) => {
             }
             konflikt.markModified('notizen');
         }
+
+        const notizPrefix = `\nVerarbeitung Verzicht für Topf-Konflikt am ${new Date().toLocaleString()}: `;
+        if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+        else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Kapazität weiterhin überschritten. Entgeltvergleich erforderlich.`;
 
         const aktualisierterKonflikt = await konflikt.save(); // Speichere das Konfliktdokument
 
@@ -1193,7 +1450,7 @@ exports.verarbeiteEinzelSlotVerzichtVerschub = async (req, res) => {
 
     try {
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
-            .populate('beteiligteAnfragen', '_id Status Entgelt ZugewieseneSlots')
+            .populate('beteiligteAnfragen', '_id Status Entgelt ZugewieseneSlots Zugnummer EVU')
             .populate('ausloesenderSlot', '_id SlotID_Sprechend');
 
         if (!konflikt) return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
@@ -1203,7 +1460,7 @@ exports.verarbeiteEinzelSlotVerzichtVerschub = async (req, res) => {
         }
 
         // Rufe die zentrale Service-Funktion auf
-        const { anfragenToSave } = await resolveVerzichtVerschubForSingleSlotConflict(
+        const { anfragenToSave } = resolveVerzichtVerschubForSingleSlotConflict(
             konflikt,
             ListeAnfragenMitVerzicht,
             ListeAnfragenVerschubKoordination
@@ -1219,6 +1476,10 @@ exports.verarbeiteEinzelSlotVerzichtVerschub = async (req, res) => {
             }
             konflikt.markModified('notizen');
         }
+
+        const notizPrefix = `\nVerarbeitung Verzicht für Slot-Konflikt am ${new Date().toLocaleString()}: `;
+        if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+        else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt besteht weiterhin. Entgeltvergleich erforderlich.`;
 
         const aktualisierterKonflikt = await konflikt.save();
 
@@ -1240,7 +1501,7 @@ exports.verarbeiteEinzelSlotVerzichtVerschub = async (req, res) => {
 };
 
 // Phase 2 Controller-Funktion
-// @desc    Führt den Entgeltvergleich für einen Konflikt durch
+// @desc    Führt den Entgeltvergleich für einen einzelnen Topf-Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/entgeltvergleich
 exports.fuehreEntgeltvergleichDurch = async (req, res) => {    
     const { konfliktId } = req.params;
@@ -1252,10 +1513,24 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
 
     try {
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
-            .populate('beteiligteAnfragen', '_id Status Entgelt AnfrageID_Sprechend EVU')
-            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet TopfID _id ListeDerSlots');
+        .populate({
+                path: 'ausloesenderKapazitaetstopf',
+                select: 'maxKapazitaet TopfID _id ListeDerSlots' // Benötigt für den Vergleich
+            })
+            .populate({
+                path: 'beteiligteAnfragen',
+                // Wähle alle Felder, die für die Logik und spätere Updates benötigt werden
+                select: 'AnfrageID_Sprechend EVU Entgelt Status ZugewieseneSlots _id Zugnummer', 
+                // Füge eine verschachtelte Population hinzu, um die Details der zugewiesenen Slots zu bekommen
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf' // Wichtig für den Vergleich in der Helferfunktion
+                }
+            });
+        
 
-        if (!konflikt) {
+        if (!konflikt || konflikt.konfliktTyp !== 'KAPAZITAETSTOPF') {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
         }
         if (!konflikt.ausloesenderKapazitaetstopf) {
@@ -1268,7 +1543,7 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
         }
 
         // Rufe die zentrale Service-Funktion auf
-        const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen);
+        const { anfragenToSave } = resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen);
        
 
         //#######################################
@@ -1285,6 +1560,10 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
             konflikt.markModified('notizen');
         }
 
+        const notizPrefix = `\nEntgeltvergleich Topf-Konflikt am ${new Date().toLocaleString()}: `;
+        if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+        else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Kein eindeutiger Gewinner. Höchstpreisverfahren erforderlich.`;
+
         const aktualisierterKonflikt = await konflikt.save();
 
         // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
@@ -1295,11 +1574,80 @@ exports.fuehreEntgeltvergleichDurch = async (req, res) => {
         }
 
         res.status(200).json({
-            message: `Entgeltvergleich für Konflikt ${konflikt.TopfID || konflikt._id} durchgeführt. Neuer Status: ${aktualisierterKonflikt.status}`,
+            message: `Entgeltvergleich für Topf-Konflikt ${konflikt.TopfID || konflikt._id} durchgeführt. Neuer Status: ${aktualisierterKonflikt.status}`,
             data: aktualisierterKonflikt
         });
 
     } catch (error) {
+        console.error(`Fehler bei PUT /api/konflikte/${konfliktId}/entgeltvergleich:`, error);
+        // ... (Standardfehlerbehandlung)
+        res.status(500).json({ message: 'Serverfehler beim Durchführen des Entgeltvergleichs.' });
+    }
+};
+
+// Phase 2 Controller-Funktion
+// @desc    Führt den Entgeltvergleich für einen EINZELNEN Slot-Konflikt durch
+// @route   PUT /api/konflikte/slot/:konfliktId/entgeltvergleich
+exports.fuehreEinzelSlotEntgeltvergleichDurch = async (req, res) => {
+    const { konfliktId } = req.params;
+    const { notizen, notizenUpdateMode } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(konfliktId)) return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
+
+
+    try {  
+        const konflikt = await KonfliktDokumentation.findById(konfliktId)
+            .populate({
+                path: 'ausloesenderSlot',
+                select: '_id SlotID_Sprechend'
+            })
+            .populate({
+                path: 'beteiligteAnfragen',
+                select: 'AnfrageID_Sprechend EVU Entgelt Status ZugewieseneSlots _id Zugnummer',
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: '_id' // Wir brauchen nur die ID für den Vergleich in der Helferfunktion
+                }
+            });
+
+        if (!konflikt || konflikt.konfliktTyp !== 'SLOT') {
+            return res.status(404).json({ message: 'Slot-Konfliktdokumentation nicht gefunden.' });
+        }
+        if (!['in_bearbeitung_entgelt'].includes(konflikt.status)) { // Passender Status
+            return res.status(400).json({ message: `Konflikt hat Status '${konflikt.status}' und kann nicht bearbeitet werden.` });
+        }
+
+        const { anfragenToSave } = resolveEntgeltvergleichForSingleSlotConflict(konflikt);
+        
+        if (notizen !== undefined) {
+            const notizPrefix = `Ergänzung vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && konflikt.notizen) {
+                konflikt.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                konflikt.notizen = (konflikt.notizen && notizenUpdateMode === 'append' ? konflikt.notizen + "\n---\n" : "") + notizPrefix + notizen;
+            }
+            konflikt.markModified('notizen');
+        }
+
+
+        const notizPrefix = `\nEntgeltvergleich Slot-Konflikt am ${new Date().toLocaleString()}: `;
+        if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+        else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Kein eindeutiger Gewinner. Höchstpreisverfahren erforderlich.`;
+        
+        const aktualisierterKonflikt = await konflikt.save();
+
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Entgeltvergleich für Slot-Konflikt ${konflikt.TopfID || konflikt._id} durchgeführt. Neuer Status: ${aktualisierterKonflikt.status}`,
+            data: aktualisierterKonflikt
+        });
+
+    } catch (error) { 
         console.error(`Fehler bei PUT /api/konflikte/${konfliktId}/entgeltvergleich:`, error);
         // ... (Standardfehlerbehandlung)
         res.status(500).json({ message: 'Serverfehler beim Durchführen des Entgeltvergleichs.' });
@@ -1322,8 +1670,22 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
 
     try {
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
-            .populate('beteiligteAnfragen', '_id Status Entgelt AnfrageID_Sprechend ZugewieseneSlots') // Entgelt für Gebotsvalidierung
-            .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet TopfID _id');
+        .populate({
+                path: 'ausloesenderKapazitaetstopf',
+                select: 'maxKapazitaet TopfID _id ListeDerSlots' // Benötigt für den Vergleich
+            })
+            .populate({
+                path: 'beteiligteAnfragen',
+                // Wähle alle Felder, die für die Logik und spätere Updates benötigt werden
+                select: 'AnfrageID_Sprechend EVU Entgelt Status ZugewieseneSlots _id Zugnummer', 
+                // Füge eine verschachtelte Population hinzu, um die Details der zugewiesenen Slots zu bekommen
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf' // Wichtig für den Vergleich in der Helferfunktion
+                }
+            });
+        
 
         if (!konflikt) {
             return res.status(404).json({ message: 'Konfliktdokumentation nicht gefunden.' });
@@ -1336,7 +1698,7 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
         }
 
         // Rufe die zentrale Service-Funktion auf
-        const { anfragenToSave } = await resolveHoechstpreisForSingleConflict(konflikt, ListeGeboteHoechstpreis);
+        const { anfragenToSave } = resolveHoechstpreisForSingleTopfConflict(konflikt, ListeGeboteHoechstpreis);
 
 
         //#######################################
@@ -1356,6 +1718,10 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
             konflikt.markModified('notizen');
         }
 
+        const notizPrefix = `\nHöchstpreisrunde Topf-Konflikt am ${new Date().toLocaleString()}: `;
+        if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+        else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Erneuter Gleichstand. Nächste Runde erforderlich.`;
+
         const aktualisierterKonflikt = await konflikt.save();
 
         // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
@@ -1371,6 +1737,63 @@ exports.verarbeiteHoechstpreisErgebnis = async (req, res) => {
 
     } catch (error) {
         console.error(`Fehler bei PUT /api/konflikte/${konfliktId}/hoechstpreis-ergebnis:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung des Höchstpreis-Ergebnisses.' });
+    }
+};
+
+// --- Controller für EINZELNEN Slot-Konflikt (Höchstpreis) ---
+// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens für einen einzelnen Slot-Konflikt
+// @route   PUT /api/konflikte/slot/:konfliktId/hoechstpreis-ergebnis
+exports.verarbeiteEinzelSlotHoechstpreisErgebnis = async (req, res) => {
+    const { konfliktId } = req.params;
+    const { ListeGeboteHoechstpreis, notizen, notizenUpdateMode } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(konfliktId)) return res.status(400).json({ message: 'Ungültiges Format für Konflikt-ID.' });
+    if (!ListeGeboteHoechstpreis || !Array.isArray(ListeGeboteHoechstpreis)) return res.status(400).json({ message: 'ListeGeboteHoechstpreis ist erforderlich.' });
+
+    try {
+        const konflikt = await KonfliktDokumentation.findById(konfliktId).populate({
+            path: 'beteiligteAnfragen',
+            select: 'AnfrageID_Sprechend EVU Entgelt Status ZugewieseneSlots Zugnummer',
+            populate: { path: 'ZugewieseneSlots.slot', select: '_id' }
+        }).populate('ausloesenderSlot', '_id');
+        
+        if (!konflikt || konflikt.konfliktTyp !== 'SLOT') return res.status(404).json({ message: 'Slot-Konfliktdokumentation nicht gefunden.' });
+        if (konflikt.status !== 'in_bearbeitung_hoechstpreis') return res.status(400).json({ message: `Konflikt hat Status '${konflikt.status}' und erwartet keine Höchstpreis-Ergebnisse.` });
+
+        // Rufe die zentrale Service-Funktion auf
+        const { anfragenToSave } = resolveHoechstpreisForSingleSlotConflict(konflikt, ListeGeboteHoechstpreis);
+        
+        // Notizen für den Einzelkonflikt aktualisieren
+        if (notizen !== undefined) {
+            const notizPrefix = `Ergänzung vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && konflikt.notizen) {
+                konflikt.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                konflikt.notizen = (konflikt.notizen && notizenUpdateMode === 'append' ? konflikt.notizen + "\n---\n" : "") + notizPrefix + notizen;
+            }
+            konflikt.markModified('notizen');
+        }
+
+        const notizPrefix = `\nHöchstpreisrunde Slot-Konflikt am ${new Date().toLocaleString()}: `;
+        if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+        else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Erneuter Gleichstand. Nächste Runde erforderlich.`;
+
+        const aktualisierterKonflikt = await konflikt.save();
+
+        // Rufe für alle geänderten Anfragen den Gesamtstatus-Update auf
+        for (const anfrageDoc of anfragenToSave.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Höchstpreisverfahren für Slot-Konflikt ${aktualisierterKonflikt._id} verarbeitet.`,
+            data: aktualisierterKonflikt
+        });
+
+    } catch (error) {
+        console.error(`Fehler bei PUT /api/konflikte/slot/${konfliktId}/hoechstpreis-ergebnis:`, error);
         res.status(500).json({ message: 'Serverfehler bei der Verarbeitung des Höchstpreis-Ergebnisses.' });
     }
 };
@@ -1417,18 +1840,25 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
     }
 
     try {
-        // 1. Lade die Gruppe und alle zugehörigen Daten
-        const gruppe = await KonfliktGruppe.findById(gruppenId)
+        // 1. Lade die Gruppe und alle zugehörigen Daten   
+            const gruppe = await KonfliktGruppe.findById(gruppenId)
             .populate({
-                path: 'beteiligteAnfragen',
-                select: '_id Status Entgelt' // Felder, die wir von den Anfragen brauchen
-            })
-            .populate({
-                path: 'konflikteInGruppe', // Lade die einzelnen Konfliktdokumente
-                populate: {
-                    path: 'ausloesenderKapazitaetstopf', // Lade zu jedem Konfliktdokument den Topf
-                    select: 'maxKapazitaet TopfID _id'
-                }
+                path: 'konflikteInGruppe', // Population der Konfliktdokumente in der Gruppe
+                populate: [ // Array, um mehrere Felder innerhalb der Konfliktdokumente zu populieren
+                    {
+                        path: 'ausloesenderKapazitaetstopf',
+                        select: 'maxKapazitaet TopfID _id'
+                    },
+                    {
+                        path: 'beteiligteAnfragen', // Populiere die Anfragen INNERHALB jedes Einzelkonflikts
+                        select: 'ZugewieseneSlots Status _id Entgelt EVU Zugnummer AnfrageID_Sprechend',
+                        populate: { // Und gehe noch eine Ebene tiefer zu den Slots
+                            path: 'ZugewieseneSlots.slot',
+                            model: 'Slot',
+                            select: 'VerweisAufTopf'
+                        }
+                    }
+                ]
             });
 
         if (!gruppe) {
@@ -1446,7 +1876,10 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
             if (konflikt.konfliktTyp !== 'KAPAZITAETSTOPF') continue; // Überspringe fälschlicherweise zugeordnete Slot-Konflikte
 
             // Rufe die zentrale Service-Funktion auf
-            const { anfragenToSave } = await resolveVerzichtVerschubForSingleTopfConflict(
+
+            console.log(konflikt);
+
+            const { anfragenToSave } = resolveVerzichtVerschubForSingleTopfConflict(
                 konflikt,
                 ListeAnfragenMitVerzicht,
                 ListeAnfragenVerschubKoordination
@@ -1458,6 +1891,11 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
             if (konflikt.status !== 'geloest') {
                 anzahlOffenerKonflikte++;
             }
+
+            const notizPrefix = `\nVerarbeitung Verzicht für Topf-Konflikt am ${new Date().toLocaleString()}: `;
+            if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+            else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Kapazität weiterhin überschritten. Entgeltvergleich erforderlich.`;
+
              await konflikt.save(); // Speichere die Änderungen am einzelnen Konfliktdokument
         }
 
@@ -1534,7 +1972,7 @@ exports.verarbeiteSlotGruppenVerzichtVerschub = async (req, res) => {
         for (const konflikt of gruppe.konflikteInGruppe) {
             if (konflikt.konfliktTyp !== 'SLOT') continue; // Überspringe fälschlicherweise zugeordnete Topf-Konflikte
 
-            const { anfragenToSave } = await resolveVerzichtVerschubForSingleSlotConflict(
+            const { anfragenToSave } = resolveVerzichtVerschubForSingleSlotConflict(
                 konflikt,
                 ListeAnfragenMitVerzicht,
                 ListeAnfragenVerschubKoordination
@@ -1543,6 +1981,10 @@ exports.verarbeiteSlotGruppenVerzichtVerschub = async (req, res) => {
             // Füge modifizierte Anfragen zur Map hinzu (Duplikate werden durch Map-Struktur vermieden)
             anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
             if (konflikt.status !== 'geloest') anzahlOffenerKonflikte++;
+
+            const notizPrefix = `\nVerarbeitung Verzicht für Slot-Konflikt am ${new Date().toLocaleString()}: `;
+            if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+            else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt besteht weiterhin. Entgeltvergleich erforderlich.`;
             
             await konflikt.save(); // Speichere die Änderungen am einzelnen Konfliktdokument
         }
@@ -1592,7 +2034,7 @@ exports.verarbeiteSlotGruppenVerzichtVerschub = async (req, res) => {
     }
 };
 
-// @desc    Führt den Entgeltvergleich für eine GANZE Konfliktgruppe durch
+// @desc    Führt den Entgeltvergleich für eine GANZE Topf-Konfliktgruppe durch
 // @route   PUT /api/konflikte/gruppen/:gruppenId/entgeltvergleich
 exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
     const { gruppenId } = req.params;
@@ -1605,7 +2047,7 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
         const gruppe = await KonfliktGruppe.findById(gruppenId)
             .populate({
                 path: 'beteiligteAnfragen', // Optional, aber gut für direkten Zugriff auf die gemeinsamen Anfragen
-                select: '_id Status Entgelt AnfrageID_Sprechend EVU'
+                select: '_id Status Entgelt AnfrageID_Sprechend EVU Zugnummer'
             })
             .populate({
                 path: 'konflikteInGruppe', // Population der Konfliktdokumente in der Gruppe
@@ -1616,10 +2058,15 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
                     },
                     {
                         path: 'beteiligteAnfragen', // JETZT wird auch dieses Feld in jedem Einzelkonflikt populiert
-                        select: '_id Status Entgelt AnfrageID_Sprechend EVU'
+                        select: '_id Status Entgelt AnfrageID_Sprechend EVU Zugnummer ZugewieseneSlots',
+                        populate: { // ...und innerhalb dieser Zuweisungen...
+                            path: 'ZugewieseneSlots.slot',
+                            model: 'Slot',
+                            select: 'VerweisAufTopf' // ...den Verweis auf den Topf des Slots.
+                        }
                     }
                 ]
-            });
+            });  
         
     if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
 
@@ -1631,7 +2078,7 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
         for (const konflikt of gruppe.konflikteInGruppe) {
             // Rufe die zentrale Service-Funktion auf
             //console.log(konflikt);
-            const { anfragenToSave } = await resolveEntgeltvergleichForSingleConflict(konflikt, evuReihungen);
+            const { anfragenToSave } = resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen);
 
             // Füge modifizierte Anfragen zur Map hinzu
             anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
@@ -1639,6 +2086,11 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
             if (konflikt.status !== 'geloest') {
                 anzahlOffenerKonflikte++;
             }
+        
+            const notizPrefix = `\nEntgeltvergleich Topf-Konflikt am ${new Date().toLocaleString()}: `;
+            if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+            else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Kein eindeutiger Gewinner. Höchstpreisverfahren erforderlich.`;
+
             await konflikt.save();
         }
 
@@ -1670,7 +2122,7 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
         }
 
         res.status(200).json({
-            message: `Entgeltvergleich für Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            message: `Entgeltvergleich für Topf-Konfliktgruppe ${gruppe._id} verarbeitet.`,
             data: {
                 gruppe: aktualisierteGruppe,
                 zusammenfassung: {
@@ -1687,7 +2139,95 @@ exports.fuehreGruppenEntgeltvergleichDurch = async (req, res) => {
     }
 };
 
-// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens für eine GANZE Konfliktgruppe
+// @desc    Führt den Entgeltvergleich für eine GANZE Slot-Konfliktgruppe durch
+// @route   PUT /api/konflikte/slot-gruppen/:gruppenId/entgeltvergleich
+exports.fuehreSlotGruppenEntgeltvergleichDurch = async (req, res) => {
+    const { gruppenId } = req.params;
+    const { notizen, notizenUpdateMode } = req.body || {};
+    
+    try {
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+    .populate({
+        path: 'konflikteInGruppe',
+        populate: [
+            {
+                path: 'ausloesenderSlot',
+                select: '_id SlotID_Sprechend'
+            },
+            {
+                path: 'beteiligteAnfragen',
+                select: '_id Status Entgelt AnfrageID_Sprechend EVU ZugewieseneSlots',
+                // NEUE, TIEFERE POPULATION
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf'
+                }
+            }
+        ]
+    });
+
+        if (!gruppe) { return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' }); }
+        
+        let alleAnfragenZumSpeichern = new Map();
+        let anzahlOffenerKonflikte = 0;
+
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            if (konflikt.konfliktTyp !== 'SLOT' || !['in_bearbeitung_entgelt'].includes(konflikt.status)) continue;
+
+            const { anfragenToSave } = resolveEntgeltvergleichForSingleSlotConflict(konflikt);
+            anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
+            if (konflikt.status !== 'geloest') anzahlOffenerKonflikte++;
+            const notizPrefix = `\nEntgeltvergleich Slot-Konflikt am ${new Date().toLocaleString()}: `;
+            if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+            else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Kein eindeutiger Gewinner. Höchstpreisverfahren erforderlich.`;
+
+            await konflikt.save();
+        }
+
+        // Aktualisiere den Gesamtstatus der Gruppe
+        if (anzahlOffenerKonflikte > 0) {
+            gruppe.status = 'in_bearbeitung_hoechstpreis'; // Wenn mind. einer zum HP geht
+        } else {
+            gruppe.status = 'vollstaendig_geloest';
+        }
+
+        // Notizen für die Gruppe
+        if (notizen !== undefined) {
+             const notizPrefix = `Gruppen-Notiz vom ${new Date().toLocaleString()}:\n`;
+            if (notizenUpdateMode === 'append' && gruppe.notizen) {
+                gruppe.notizen += "\n---\n" + notizPrefix + notizen;
+            } else {
+                gruppe.notizen = notizPrefix + notizen;
+            }
+        }
+
+        const aktualisierteGruppe = await gruppe.save();
+
+        for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Entgeltvergleich für Slot-Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            data: {
+                gruppe: aktualisierteGruppe,
+                zusammenfassung: {
+                    anzahlKonflikteInGruppe: gruppe.konflikteInGruppe.length,
+                    davonGeloest: gruppe.konflikteInGruppe.length - anzahlOffenerKonflikte,
+                    davonOffen: anzahlOffenerKonflikte
+                }
+            }
+        });
+
+    } catch (error) { 
+        console.error(`Fehler bei PUT /api/konflikte/slot-gruppen/${gruppenId}/entgeltvergleich:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
+     }
+};
+
+// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens für eine GANZE Topf-Konfliktgruppe
 // @route   PUT /api/konflikte/gruppen/:gruppenId/hoechstpreis-ergebnis
 exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
     const { gruppenId } = req.params;
@@ -1701,21 +2241,26 @@ exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
         const gruppe = await KonfliktGruppe.findById(gruppenId)
             .populate({
                 path: 'beteiligteAnfragen', // Optional, aber gut für direkten Zugriff auf die gemeinsamen Anfragen
-                select: '_id Status Entgelt AnfrageID_Sprechend EVU'
+                select: '_id Status Entgelt AnfrageID_Sprechend EVU Zugnummer'
             })
             .populate({
                 path: 'konflikteInGruppe', // Population der Konfliktdokumente in der Gruppe
                 populate: [ // NEU: Array, um mehrere Felder innerhalb der Konfliktdokumente zu populieren
                     {
                         path: 'ausloesenderKapazitaetstopf',
-                        select: 'maxKapazitaet TopfID _id'
+                        select: 'maxKapazitaet TopfID _id ListeDerSlots'
                     },
                     {
                         path: 'beteiligteAnfragen', // JETZT wird auch dieses Feld in jedem Einzelkonflikt populiert
-                        select: '_id Status Entgelt AnfrageID_Sprechend EVU ZugewieseneSlots'
+                        select: '_id Status Entgelt AnfrageID_Sprechend EVU Zugnummer ZugewieseneSlots',
+                        populate: { // ...und innerhalb dieser Zuweisungen...
+                            path: 'ZugewieseneSlots.slot',
+                            model: 'Slot',
+                            select: 'VerweisAufTopf' // ...den Verweis auf den Topf des Slots.
+                        }
                     }
                 ]
-            });
+            });             
 
     if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
     if (gruppe.status !== 'in_bearbeitung_hoechstpreis') {
@@ -1737,7 +2282,7 @@ exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
                 return res.status(500).json({ message: 'Konfliktdokumentation hat keinen verknüpften Kapazitätstopf.' });
             }
             
-            const { anfragenToSave } = await resolveHoechstpreisForSingleConflict(
+            const { anfragenToSave } = resolveHoechstpreisForSingleTopfConflict(
                 konflikt,
                 ListeGeboteHoechstpreis
             );
@@ -1748,6 +2293,11 @@ exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
             if (konflikt.status !== 'geloest') {
                 anzahlOffenerKonflikte++;
             }
+
+            const notizPrefix = `\nHöchstpreisrunde Topf-Konflikt am ${new Date().toLocaleString()}: `;
+            if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+            else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Erneuter Gleichstand. Nächste Runde erforderlich.`;
+
             await konflikt.save();
         }
 
@@ -1792,6 +2342,87 @@ exports.verarbeiteGruppenHoechstpreisErgebnis = async (req, res) => {
         console.error(`Fehler bei PUT /api/konflikte/gruppen/${gruppenId}/hoechstpreis-ergebnis:`, error);
         res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Konfliktgruppe.' });
      }
+};
+
+// --- Controller für eine GRUPPE von Slot-Konflikten (Höchstpreis) ---
+// @desc    Verarbeitet das Ergebnis des Höchstpreisverfahrens für eine ganze Slot-Konfliktgruppe
+// @route   PUT /api/konflikte/slot-gruppen/:gruppenId/hoechstpreis-ergebnis
+exports.verarbeiteSlotGruppenHoechstpreisErgebnis = async (req, res) => {
+    const { gruppenId } = req.params;
+    const { ListeGeboteHoechstpreis, notizen, notizenUpdateMode } = req.body || {};
+    
+    // ... (Validierung der gruppenId und Laden der Gruppe mit tiefer Population wie zuvor) ...
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    const gruppe = await KonfliktGruppe.findById(gruppenId)
+    .populate({
+        path: 'konflikteInGruppe',
+        populate: [
+            {
+                path: 'ausloesenderSlot',
+                select: '_id SlotID_Sprechend'
+            },
+            {
+                path: 'beteiligteAnfragen',
+                select: '_id Status Entgelt AnfrageID_Sprechend EVU ZugewieseneSlots',
+                // NEUE, TIEFERE POPULATION
+                populate: {
+                    path: 'ZugewieseneSlots.slot',
+                    model: 'Slot',
+                    select: 'VerweisAufTopf'
+                }
+            }
+        ]
+    });
+
+    if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+    if (gruppe.status !== 'in_bearbeitung_hoechstpreis') return res.status(400).json({ message: `Konfliktgruppe hat Status '${gruppe.status}' und erwartet keine Höchstpreis-Ergebnisse.` });
+
+    try {
+        let alleAnfragenZumSpeichern = new Map();
+        let anzahlOffenerKonflikte = 0;
+
+        for (const konflikt of gruppe.konflikteInGruppe) {
+            if (konflikt.konfliktTyp !== 'SLOT' || konflikt.status !== 'in_bearbeitung_hoechstpreis') continue;
+
+            const { anfragenToSave } = resolveHoechstpreisForSingleSlotConflict(
+                konflikt,
+                ListeGeboteHoechstpreis // Übergebe die komplette Liste, die Service-Funktion filtert die relevanten Gebote
+            );
+
+            anfragenToSave.forEach((doc, id) => alleAnfragenZumSpeichern.set(id, doc));
+            if (konflikt.status !== 'geloest') anzahlOffenerKonflikte++;
+
+            const notizPrefix = `\nHöchstpreisrunde Slot-Konflikt am ${new Date().toLocaleString()}: `;
+            if (konflikt.status === 'geloest') konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Konflikt gelöst.`;
+            else konflikt.notizen = (konflikt.notizen || '') + `${notizPrefix}Erneuter Gleichstand. Nächste Runde erforderlich.`;
+
+            await konflikt.save();
+        }
+
+        // Aktualisiere den Gesamtstatus der Gruppe
+        if (anzahlOffenerKonflikte > 0) {
+            gruppe.status = 'in_bearbeitung_hoechstpreis';
+        } else {
+            gruppe.status = 'vollstaendig_geloest';
+        }
+        if (notizen !== undefined) { /* ... Notizen für Gruppe ... */ }
+        const aktualisierteGruppe = await gruppe.save();
+
+        // Finalisiere die Anfrage-Updates
+        for (const anfrageDoc of alleAnfragenZumSpeichern.values()) {
+            await anfrageDoc.updateGesamtStatus();
+            await anfrageDoc.save();
+        }
+
+        res.status(200).json({
+            message: `Höchstpreisverfahren für Slot-Konfliktgruppe ${gruppe._id} verarbeitet.`,
+            data: aktualisierteGruppe
+        });
+
+    } catch (error) {
+        console.error(`Fehler bei PUT /api/konflikte/slot-gruppen/${gruppenId}/hoechstpreis-ergebnis:`, error);
+        res.status(500).json({ message: 'Serverfehler bei der Verarbeitung der Slot-Konfliktgruppe.' });
+    }
 };
 
 // @desc    Analysiert die Kapazität der Nachbartöpfe für eine Konfliktgruppe

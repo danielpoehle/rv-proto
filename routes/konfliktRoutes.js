@@ -44,15 +44,26 @@ router.put('/:konfliktId/verzicht-verschub', konfliktController.verarbeiteVerzic
 // @route   PUT /api/konflikte/slot/:konfliktId/verzicht-verschub
 router.put('/slot/:konfliktId/verzicht-verschub', konfliktController.verarbeiteEinzelSlotVerzichtVerschub);
 
-// Phase 2: Entgeltvergleich für einen Konflikt
+// Phase 2: Entgeltvergleich für einen Topf-Konflikt
 // @desc    Führt den Entgeltvergleich für einen EINZELNEN Topf-Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/entgeltvergleich
 router.put('/:konfliktId/entgeltvergleich', konfliktController.fuehreEntgeltvergleichDurch);
 
-// Phase 3: Höchstpreis-Ergebnis für einen Konflikt
+// Phase 2: Entgeltvergleich für einen Slot-Konflikt
+// @desc    Führt den Entgeltvergleich für einen EINZELNEN Slot-Konflikt durch
+// @route   PUT /api/konflikte/slot/:konfliktId/entgeltvergleich
+router.put('/slot/:konfliktId/entgeltvergleich', konfliktController.fuehreEinzelSlotEntgeltvergleichDurch);
+
+// Phase 3: Höchstpreis-Ergebnis für einen Topf-Konflikt
 // @desc    Führt das Höchstpreisverfahren für einen EINZELNEN Topf-Konflikt durch
 // @route   PUT /api/konflikte/:konfliktId/hoechstpreis-ergebnis
 router.put('/:konfliktId/hoechstpreis-ergebnis', konfliktController.verarbeiteHoechstpreisErgebnis);
+
+// Phase 3: Höchstpreis-Ergebnis für einen Slot-Konflikt
+// @desc    Führt das Höchstpreisverfahren für einen EINZELNEN Slot-Konflikt durch
+// @route   PUT /api/konflikte/slot/:konfliktId/hoechstpreis-ergebnis
+router.put('/slot/:konfliktId/hoechstpreis-ergebnis', konfliktController.verarbeiteEinzelSlotHoechstpreisErgebnis);
+
 
 // ROUTE für die Detail- und Bearbeitungsseite einer Gruppe
 // @route   GET /api/konflikte/gruppen/:gruppenId
@@ -74,19 +85,33 @@ router.put('/slot-gruppen/:gruppenId/verzicht-verschub', konfliktController.vera
 
 
 
-// ROUTE für Gruppen-Entgeltvergleich
-// Phase 2: Entgeltvergleich für eine Gruppe identischer Konflikte
+// ROUTE für Gruppen-Entgeltvergleich (Töpfe)
+// Phase 2: Entgeltvergleich für eine Gruppe identischer Topf-Konflikte
 // @route   PUT /api/konflikte/gruppen/:gruppenId/entgeltvergleich
-// @desc    Phase 2: Führt Entgeltvergleich zur Konfliktlösung für eine ganze Konfliktgruppe durch
+// @desc    Phase 2: Führt Entgeltvergleich zur Konfliktlösung für eine ganze Topf-Konfliktgruppe durch
 // @access  Admin/System
 router.put('/gruppen/:gruppenId/entgeltvergleich', konfliktController.fuehreGruppenEntgeltvergleichDurch);
 
-// ROUTEN für Gruppen- und Einzel-Höchstpreisverfahren
-// Phase 3: Höchstpreisverfahren für eine Gruppe identischer Konflikte
+// ROUTE für Gruppen-Entgeltvergleich (Slots)
+// Phase 2: Entgeltvergleich für eine Gruppe identischer Slot-Konflikte
+// @route   PUT /api/konflikte/slot-gruppen/:gruppenId/entgeltvergleich
+// @desc    Phase 2: Führt Entgeltvergleich zur Konfliktlösung für eine ganze Slot-Konfliktgruppe durch
+router.put('/slot-gruppen/:gruppenId/entgeltvergleich', konfliktController.fuehreSlotGruppenEntgeltvergleichDurch);
+
+
+// ROUTE für Gruppen-Höchstpreisverfahren (Töpfe)
+// Phase 3: Höchstpreisverfahren für eine Gruppe identischer Topf-Konflikte
 // @route   PUT /api/konflikte/gruppen/:gruppenId/hoechstpreis-ergebnis
-// @desc    Phase 3: Führt Höchstpreisverfahren zur Konfliktlösung für eine ganze Konfliktgruppe durch
+// @desc    Phase 3: Führt Höchstpreisverfahren zur Konfliktlösung für eine ganze Topf-Konfliktgruppe durch
 // @access  Admin/System
 router.put('/gruppen/:gruppenId/hoechstpreis-ergebnis', konfliktController.verarbeiteGruppenHoechstpreisErgebnis);
+
+// ROUTE für Gruppen-Höchstpreisverfahren (Slots)
+// Phase 3: Höchstpreisverfahren für eine Gruppe identischer Slot-Konflikte
+// @route   PUT /api/konflikte/slot-gruppen/:gruppenId/hoechstpreis-ergebnis
+// @desc    Phase 3: Führt Höchstpreisverfahren zur Konfliktlösung für eine ganze Slot-Konfliktgruppe durch
+router.put('/slot-gruppen/:gruppenId/hoechstpreis-ergebnis', konfliktController.verarbeiteSlotGruppenHoechstpreisErgebnis);
+
 
 // ROUTE für die Verschiebungs-Analyse
 // @route   GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse
