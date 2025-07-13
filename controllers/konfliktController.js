@@ -1798,22 +1798,29 @@ exports.verarbeiteEinzelSlotHoechstpreisErgebnis = async (req, res) => {
     }
 };
 
-// @desc    Ruft alle persistierten Konfliktgruppen ab
+// @desc    Ruft alle persistierten Topf-Konfliktgruppen und Slot-Konfliktgruppen ab
 // @route   GET /api/konflikte/gruppen
 exports.identifiziereKonfliktGruppen = async (req, res) => {
     try {        
         // Filtere optional nach Status der Gruppe, z.B. alle, die nicht gelöst sind
-        //const filter = { status: { $ne: 'vollstaendig_geloest' } };
+        //const filter = { status: { $ne: 'vollstaendig_geloest' } };        
 
-        const gruppen = await KonfliktGruppe.find()//find(filter)
+            const gruppen = await KonfliktGruppe.find()
             .populate('beteiligteAnfragen', 'AnfrageID_Sprechend EVU Entgelt Verkehrsart')
             .populate({
                 path: 'konflikteInGruppe',
-                select: 'status ausloesenderKapazitaetstopf',
-                populate: {
-                    path: 'ausloesenderKapazitaetstopf',
-                    select: 'TopfID maxKapazitaet'
-                }
+                select: 'status konfliktTyp ausloesenderKapazitaetstopf ausloesenderSlot',
+                // HIER DIE ANPASSUNG: Wir populieren jetzt BEIDE möglichen Auslöser
+                populate: [
+                    {
+                        path: 'ausloesenderKapazitaetstopf',
+                        select: 'TopfID maxKapazitaet'
+                    },
+                    {
+                        path: 'ausloesenderSlot',
+                        select: 'SlotID_Sprechend von bis'
+                    }
+                ]
             })
             .sort({ updatedAt: -1 }); // Die zuletzt bearbeiteten Gruppen zuerst
 
@@ -1953,13 +1960,25 @@ exports.verarbeiteSlotGruppenVerzichtVerschub = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(gruppenId)) return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
 
     try {
-        const gruppe = await KonfliktGruppe.findById(gruppenId).populate({
-            path: 'konflikteInGruppe',
-            populate: [
-                { path: 'beteiligteAnfragen', select: '_id Status Entgelt' },
-                { path: 'ausloesenderSlot', select: '_id' }
-            ]
-        });
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'konflikteInGruppe', // Population der Konfliktdokumente in der Gruppe
+                populate: [ // Array, um mehrere Felder innerhalb der Konfliktdokumente zu populieren
+                    {
+                        path: 'ausloesenderSlot',
+                        select: 'TopfID _id'
+                    },
+                    {
+                        path: 'beteiligteAnfragen', // Populiere die Anfragen INNERHALB jedes Einzelkonflikts
+                        select: 'ZugewieseneSlots Status _id Entgelt EVU Zugnummer AnfrageID_Sprechend',
+                        populate: { // Und gehe noch eine Ebene tiefer zu den Slots
+                            path: 'ZugewieseneSlots.slot',
+                            model: 'Slot',
+                            select: 'VerweisAufTopf'
+                        }
+                    }
+                ]
+            });
         if (!gruppe) return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
         if (!['offen', 'in_bearbeitung_verzicht'].includes(gruppe.status)) {
              return res.status(400).json({ message: `Konfliktgruppe ist im Status '${gruppe.status}' und kann nicht bearbeitet werden.` });

@@ -16,7 +16,7 @@ router.post('/identifiziere-topf-konflikte', konfliktController.identifiziereTop
 router.post('/identifiziere-slot-konflikte', konfliktController.identifiziereSlotKonflikte);
 
 
-// ROUTE zum Abruf aller Gruppen von Konflikten
+// ROUTE zum Abruf aller Gruppen von Topf- und Slot-Konflikten
 // @route   GET /api/konflikte/gruppen
 // @desc    Ruft alle Gruppen von Konflikten mit identischen beteiligten Anfragen ab
 // @access  Admin/System
