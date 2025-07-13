@@ -969,6 +969,16 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                 // Wenn keine Konfliktdoku existiert, dann war der Topf nie überbucht und kann gelöst werden
                 if(!offenerKonflikt){
                     for (const anfrage of topf.ListeDerAnfragen) {
+                        // wenn die Anfrage schon in einem Slot-Konflikt ist oder final bestätigt oder abgeleht wurde,
+                        // dann muss sie nicht mehr in den Status bestätigt_topf zurück gehen und kann übersprungen werden
+                        const slotKonfliktOderSpaeter = [
+                            'in_konfliktloesung_slot', 
+                            'teilweise_final_bestaetigt',
+                            'vollstaendig_final_bestaetigt',
+                            'final_abgelehnt',
+                            'fehlende_Plausi'
+                        ];
+                        if(slotKonfliktOderSpaeter.includes(anfrage.Status)) continue;
                         await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
@@ -1053,10 +1063,29 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
             'bestaetigt_slot_nachgerueckt'
         ];
 
+        const aktiveUndEntschiedeneSlotKonfliktStatusse = [
+            'bestaetigt_topf',
+            'bestaetigt_topf_entgelt',
+            'bestaetigt_topf_hoechstpreis',
+            'wartet_konflikt_slot',
+            'wartet_entgeltentscheidung_slot',
+            'wartet_hoechstpreis_slot',
+            'bestaetigt_slot',
+            'bestaetigt_slot_entgelt',
+            'bestaetigt_slot_hoechstpreis',
+            'bestaetigt_slot_nachgerueckt',
+            'abgelehnt_slot_verzichtet',        
+            'abgelehnt_slot_verschoben',        
+            'abgelehnt_slot_entgelt',           
+            'abgelehnt_slot_hoechstpreis',      
+            'abgelehnt_slot_hoechstpreis_ungueltig',
+            'abgelehnt_slot_hoechstpreis_kein_gebot'
+        ];
+
         let anfragenToSave = new Map();
 
         for (const slot of alleSlots) {            
-            // 3. Ermittle "aktive" Anfragen für DIESEN Slot
+            // 3a. Ermittle "aktive" Anfragen für DIESEN Slot --> Zählung für die Überschreitung der Kapazität
             const aktiveAnfragenFuerSlot = slot.zugewieseneAnfragen.filter(anfrage => {
                 // Finde die spezifische Zuweisung dieses Slots in der Anfrage
                 const zuweisung = anfrage.ZugewieseneSlots.find(zs => zs.slot?._id.equals(slot._id));
@@ -1069,6 +1098,14 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 slotsOhneKonflikt.push(slot.SlotID_Sprechend || slot._id);
                 continue;
             }
+
+            // 3b. Ermittle "aktive" und bereits entschiedenen Anfragen für DIESEN Slot --> Zählung für die Konfliktbeteiligung
+            const aktiveUndEntschiedeneAnfragenFuerSlot = slot.zugewieseneAnfragen.filter(anfrage => {
+                // Finde die spezifische Zuweisung dieses Slots in der Anfrage
+                const zuweisung = anfrage.ZugewieseneSlots.find(zs => zs.slot?._id.equals(slot._id));
+                // Eine Anfrage ist aktiv, wenn ihr Einzelstatus für diesen Slot in der Liste der aktiven Status enthalten ist.
+                return zuweisung && aktiveUndEntschiedeneSlotKonfliktStatusse.includes(zuweisung.statusEinzelzuweisung);
+            });
             
             const maxKapazitaetSlot = 1;
             const istUeberbucht = aktiveAnfragenFuerSlot.length > maxKapazitaetSlot;
@@ -1078,7 +1115,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
 
                 // 4. Konfliktdokument erstellen/aktualisieren (gleiche Logik wie bei Töpfen)
                 let konfliktDoku = await KonfliktDokumentation.findOne({ ausloesenderSlot: slot._id });
-                const aktuelleBeteiligteAnfragenIds = aktiveAnfragenFuerSlot.map(a => a._id);
+                const aktuelleBeteiligteAnfragenIds = aktiveUndEntschiedeneAnfragenFuerSlot.map(a => a._id);
 
                 if (konfliktDoku) {
                     if (!sindObjectIdArraysGleich(aktuelleBeteiligteAnfragenIds, konfliktDoku.beteiligteAnfragen)) {
@@ -1103,7 +1140,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                         aktualisierteUndGeoeffneteKonflikte.push(konfliktDoku);
                         
                         // Alle Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_slot'
-                        for (const anfrage of aktiveAnfragenFuerSlot) {
+                        for (const anfrage of aktiveUndEntschiedeneAnfragenFuerSlot) {
                             await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot');
                             anfragenToSave.set(anfrage._id.toString(), anfrage);
                         }
@@ -1123,7 +1160,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                     neuErstellteKonfliktDokus.push(neuesKonfliktDoku);
 
                     // Alle aktiven Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
-                    for (const anfrage of aktiveAnfragenFuerSlot) {
+                    for (const anfrage of aktiveUndEntschiedeneAnfragenFuerSlot) {
                         await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot');
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
