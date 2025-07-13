@@ -506,11 +506,14 @@ exports.getAnfrageSummary = async (req, res) => {
                         inPruefungTopf: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "in_konfliktpruefung"] } } }
                         },
-                        inKonflikt: { // Fasst alle "in Arbeit"-Status zusammen
-                            $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['in_konfliktloesung_topf', 'in_konfliktloesung_slot']] } } }
+                        inKonfliktTopf: { 
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", 'in_konfliktloesung_topf'] } } }
                         },
                         inPruefungSlot: {
                             $size: { $filter: { input: "$statusListe", cond: { $in: ["$$this", ['vollstaendig_bestaetigt_topf', 'teilweise_bestaetigt_topf']] } } }
+                        },
+                        inKonfliktSlot: { 
+                            $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", 'in_konfliktloesung_slot'] } } }
                         },                        
                         bestaetigt: {
                             $size: { $filter: { input: "$statusListe", cond: { $eq: ["$$this", "vollstaendig_final_bestaetigt"] } } }
