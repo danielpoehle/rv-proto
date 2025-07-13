@@ -1267,7 +1267,14 @@ exports.getAllKonflikte = async (req, res) => {
         // 1. Lade die Konfliktdokumente für die aktuelle Seite
         const konflikte = await KonfliktDokumentation.find(filter)
             .select('-__v') // Schließe das __v Feld aus
-            .populate('ausloesenderKapazitaetstopf', 'TopfID Verkehrsart maxKapazitaet')
+            .populate({ // NEU: Populiere BEIDE möglichen Auslöser-Felder
+                path: 'ausloesenderKapazitaetstopf',
+                select: 'TopfID Verkehrsart maxKapazitaet'
+            })
+            .populate({ // NEU: Populiere BEIDE möglichen Auslöser-Felder
+                path: 'ausloesenderSlot',
+                select: 'SlotID_Sprechend Verkehrsart' // Holen wir auch hier die VA für eine einheitliche Anzeige
+            })
             .sort(sortOptions)
             .skip(skip)
             .limit(limit)
@@ -1334,7 +1341,7 @@ exports.getKonfliktById = async (req, res) => {
 
         // Schritt 1: Lade das Konfliktdokument und seine direkten Referenzen
         const konflikt = await KonfliktDokumentation.findById(konfliktId)
-            // Stufe 1: Populiere den auslösenden Kapazitätstopf
+            // Stufe 1: Populiere den auslösenden Kapazitätstopf (falls vorhanden)
             .populate({
                 path: 'ausloesenderKapazitaetstopf',
                 // Stufe 2: Innerhalb des Topfes, populiere dessen Liste von Slots
@@ -1345,6 +1352,8 @@ exports.getKonfliktById = async (req, res) => {
                     select: 'SlotID_Sprechend Linienbezeichnung Abschnitt zugewieseneAnfragen'
                 }
             })
+            // Populiere den auslösenden Slot (falls vorhanden)
+            .populate('ausloesenderSlot', 'SlotID_Sprechend von bis Abschnitt')
             .populate([
                 { path: 'beteiligteAnfragen', select: 'AnfrageID_Sprechend EVU Zugnummer Status Verkehrsart Entgelt' },
                 { path: 'zugewieseneAnfragen', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
