@@ -1869,6 +1869,8 @@ exports.identifiziereKonfliktGruppen = async (req, res) => {
                 ]
             })
             .sort({ updatedAt: -1 }); // Die zuletzt bearbeiteten Gruppen zuerst
+            
+            
 
         res.status(200).json({
             message: `${gruppen.length} aktive Konfliktgruppen gefunden.`,
@@ -2885,13 +2887,20 @@ exports.getKonfliktGruppeById = async (req, res) => {
                     select: 'VerweisAufTopf' // Wichtig: Den Verweis zum Topf mitladen
                 }
             })
-            // Populate der Einzelkonflikte für die Gruppe
+            // Populate der Einzelkonflikte für die Gruppe  
             .populate({
                 path: 'konflikteInGruppe',
+                select: 'status konfliktTyp ausloesenderKapazitaetstopf ausloesenderSlot ReihungEntgelt',
+                // HIER DIE ANPASSUNG: Wir populieren jetzt BEIDE möglichen Auslöser
                 populate: [
-                    { path: 'ausloesenderKapazitaetstopf', 
-                        select: '_id TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet ListeDerSlots' 
-                    }, // Wichtig: ID des Topfes
+                    {
+                        path: 'ausloesenderKapazitaetstopf',
+                        select: '_id TopfID Abschnitt Kalenderwoche Verkehrstag Zeitfenster maxKapazitaet ListeDerSlots'
+                    },
+                    {
+                        path: 'ausloesenderSlot',
+                        select: '_id SlotID_Sprechend von bis Kalenderwoche Verkehrstag ListeDerSlots'
+                    },
                     {
                         path: 'ReihungEntgelt.anfrage',
                         model: 'Anfrage',
