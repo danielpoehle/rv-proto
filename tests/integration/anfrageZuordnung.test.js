@@ -186,7 +186,7 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         //console.log(zuordnenResponse);
         expect(zuordnenResponse.status).toBe(200);
         const aktualisierteAnfrage = zuordnenResponse.body.data;
-        expect(aktualisierteAnfrage.Status).toBe("in_konfliktloesung_topf");
+        expect(aktualisierteAnfrage.Status).toBe("in_konfliktpruefung");
 
         // ----- 4. Überprüfung -----
         // 4.1 Zugewiesene Slots in der Anfrage
@@ -302,7 +302,7 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
 
         expect(zuordnenResponse.status).toBe(200);
         const aktualisierteAnfrage = zuordnenResponse.body.data;
-        expect(aktualisierteAnfrage.Status).toBe("in_konfliktloesung_topf");
+        expect(aktualisierteAnfrage.Status).toBe("in_konfliktpruefung");
 
         // ----- 4. Überprüfung -----
         // 4.1 Zugewiesene Slots in der Anfrage (sollten alle 8 sein)
