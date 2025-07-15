@@ -115,7 +115,7 @@ function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfragenMit
     const ausloesenderTopfId = konflikt.ausloesenderKapazitaetstopf._id;
     let anfragenToSave = new Map(); // Sammelt modifizierte Anfrage-Dokumente, um doppeltes Speichern zu vermeiden
 
-    console.log(konflikt);
+    //console.log(konflikt);
 
     // Verzicht verarbeiten
     if (listeAnfragenMitVerzicht && Array.isArray(listeAnfragenMitVerzicht)) {
@@ -1932,7 +1932,7 @@ exports.verarbeiteGruppenVerzichtVerschub = async (req, res) => {
 
             // Rufe die zentrale Service-Funktion auf
 
-            console.log(konflikt);
+            //console.log(konflikt);
 
             const { anfragenToSave } = resolveVerzichtVerschubForSingleTopfConflict(
                 konflikt,
