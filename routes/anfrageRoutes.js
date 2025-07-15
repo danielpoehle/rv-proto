@@ -26,6 +26,10 @@ router.post('/zuordnen/alle-validierten', anfrageController.zuordneAlleValidiert
 // @access  Public
 router.post('/:anfrageId/zuordnen', anfrageController.zuordneEinzelneAnfrage);
 
+// @route   POST /api/anfragen/:anfrageId/reset-zuordnung
+// @desc    Setzt die Slot-Zuweisung für eine Anfrage zurück
+router.post('/:anfrageId/reset-zuordnung', anfrageController.resetAnfrageZuordnungController);
+
 // @route   GET /api/anfragen
 // @desc    Ruft alle Anfragen ab (mit Filter- und Sortiermöglichkeiten)
 // @access  Public
@@ -34,12 +38,12 @@ router.get('/', anfrageController.getAllAnfragen);
 // @route   GET /api/anfragen/:anfrageId
 // @desc    Ruft eine einzelne Anfrage anhand ihrer ID (_id oder AnfrageID_Sprechend) ab
 // @access  Public (später ggf. anpassen)
-router.get('/:anfrageId', anfrageController.getAnfrageById); // <-- NEU HINZUGEFÜGT
+router.get('/:anfrageId', anfrageController.getAnfrageById); 
 
 // @route   PUT /api/anfragen/:anfrageId
 // @desc    Aktualisiert eine bestehende Anfrage (z.B. zur Korrektur)
 // @access  Public (später ggf. anpassen)
-router.put('/:anfrageId', anfrageController.updateAnfrage); // <-- NEU HINZUGEFÜGT
+router.put('/:anfrageId', anfrageController.updateAnfrage); 
 
 
 

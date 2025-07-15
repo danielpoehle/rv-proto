@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Anfrage = require('../models/Anfrage');
 const Slot = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
+const KonfliktDokumentation = require('../models/KonfliktDokumentation');
 const { parseISO, getDay, eachDayOfInterval, startOfWeek } = require('date-fns');
 const { getGlobalRelativeKW } = require('../utils/date.helpers'); 
 const { UTCDate } = require('@date-fns/utc');
@@ -205,7 +206,7 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
     }));
     anfrage.markModified('ZugewieseneSlots');
 
-    anfrage.Status = 'in_konfliktloesung_topf';
+    anfrage.Status = 'in_konfliktpruefung';
     anfrage.Validierungsfehler = anfrage.Validierungsfehler.filter(err => !err.startsWith("Für den Abschnitt"));
 
     // Entgelt berechnen
@@ -258,7 +259,81 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
     return gespeicherteAnfrage;
 }
 
+/**
+ * SETZT EINE ANFRAGE-ZUORDNUNG ZURÜCK: Entfernt alle zugewiesenen Slots,
+ * setzt das Entgelt zurück und aktualisiert alle bidirektionalen Verknüpfungen.
+ * @param {string|ObjectId} anfrageId - Die ID der zurückzusetzenden Anfrage.
+ * @returns {Promise<Document>} Das aktualisierte Anfrage-Objekt.
+ */
+async function resetAnfrageZuordnung(anfrageId) {
+    // 1. Lade die Anfrage mit allen relevanten Details
+    const anfrage = await Anfrage.findById(anfrageId).populate({
+        path: 'ZugewieseneSlots.slot',
+        select: 'VerweisAufTopf'
+    });
+
+    if (!anfrage) throw new Error(`Anfrage mit ID ${anfrageId} nicht gefunden.`);
+
+    // 2a. Sicherheitsprüfung: Ist die Anfrage in einem zurücksetzbaren Zustand?
+    // Erlaubt sind nur Status, die noch keinen unumkehrbaren Konfliktlösungsschritt durchlaufen haben.
+    const erlaubteResetStatus = [
+        'initial_in_konfliktpruefung_topf',
+        'bestaetigt_topf', // Wenn Topf konfliktfrei war, aber noch keine Slot-Konflikte geprüft wurden
+        'bestaetigt_slot' // etc.
+    ];
+    const kannZurueckgesetztWerden = anfrage.ZugewieseneSlots.every(zs => 
+        erlaubteResetStatus.includes(zs.statusEinzelzuweisung)
+    );
+
+    // 2b. Sicherheitsprüfung: Zähle, in wie vielen Konfliktdokumenten diese Anfrage als beteiligt geführt wird.
+    const anzahlKonflikte = await KonfliktDokumentation.countDocuments({
+        beteiligteAnfragen: anfrage._id
+    });
+
+    if (!kannZurueckgesetztWerden || anzahlKonflikte > 0) {
+        throw new Error(`Anfrage ${anfrage.AnfrageID_Sprechend || anfrageId} kann nicht zurückgesetzt werden, da sie bereits bei ${anzahlKonflikte} Konflikt(en) in einem fortgeschrittenen Konfliktlösungsprozess ist. Bitte zuerst den/die Konflikt(e) über die Gruppen-Bearbeitung zurücksetzen.`);
+    }
+
+    // 3. Sammle die IDs der zu bereinigenden Slots und Töpfe, BEVOR wir sie löschen
+    if (anfrage.ZugewieseneSlots && anfrage.ZugewieseneSlots.length > 0) {
+        const slotIdsToClean = anfrage.ZugewieseneSlots.map(zs => zs.slot._id);
+        const topfIdsToClean = new Set(
+            anfrage.ZugewieseneSlots
+                .map(zs => zs.slot?.VerweisAufTopf?.toString())
+                .filter(Boolean) // Entferne null/undefined
+        );
+
+        // 4. Bereinige die bidirektionalen Verknüpfungen
+        // Entferne die Anfrage-ID aus allen betroffenen Slots
+        await Slot.updateMany(
+            { _id: { $in: slotIdsToClean } },
+            { $pull: { zugewieseneAnfragen: anfrage._id } }
+        );
+        console.log(`Anfrage ${anfrage._id} aus ${slotIdsToClean.length} Slots entfernt.`);
+
+        // Entferne die Anfrage-ID aus allen betroffenen Kapazitätstöpfen
+        if (topfIdsToClean.size > 0) {
+            await Kapazitaetstopf.updateMany(
+                { _id: { $in: Array.from(topfIdsToClean) } },
+                { $pull: { ListeDerAnfragen: anfrage._id } }
+            );
+            console.log(`Anfrage ${anfrage._id} aus ${topfIdsToClean.size} Kapazitätstöpfen entfernt.`);
+        }
+    }
+
+    // 5. Setze die Anfrage selbst zurück
+    anfrage.ZugewieseneSlots = [];
+    anfrage.Entgelt = null;
+    anfrage.Status = 'validiert'; // Zurück zum Status vor der Zuordnung
+    anfrage.Validierungsfehler = []; // Ggf. alte Zuordnungsfehler löschen
+
+    anfrage.save();
+
+    return anfrage;
+}
+
 module.exports = {
-    fuehreAnfrageZuordnungDurch
+    fuehreAnfrageZuordnungDurch,
+    resetAnfrageZuordnung
     // Hier könnten später weitere Service-Funktionen für Anfragen hinzukommen
 };

@@ -555,3 +555,21 @@ exports.getAnfrageSummary = async (req, res) => {
         res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
     }
 };
+
+// @desc    Controller zum Zurücksetzen einer Anfrage-Zuweisung in den Status validiert, wenn sie in keinem Konflikt ist.
+// @route   POST /api/anfragen/:anfrageId/reset-zuordnung
+exports.resetAnfrageZuordnungController = async (req, res) => {
+    try {
+        const anfrageId = req.params.anfrageId;
+        const zurueckgesetzteAnfrage = await anfrageService.resetAnfrageZuordnung(anfrageId);
+
+        res.status(200).json({
+            message: `Zuweisung für Anfrage ${zurueckgesetzteAnfrage.AnfrageID_Sprechend || anfrageId} erfolgreich zurückgesetzt. Status ist nun 'validiert'.`,
+            data: zurueckgesetzteAnfrage
+        });
+    } catch (error) {
+        console.error(`Fehler beim Zurücksetzen der Anfrage ${req.params.anfrageId}:`, error.message);
+        // Sende den Fehler mit einem passenden Statuscode (z.B. 400 für Bad Request, wenn die Bedingung nicht erfüllt war)
+        res.status(400).json({ message: "Zurücksetzen fehlgeschlagen.", error: error.message });
+    }
+};
