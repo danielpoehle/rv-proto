@@ -579,3 +579,95 @@ exports.getSlotSummary = async (req, res) => {
         res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
     }
 };
+
+// @desc    Liefert eine aggregierte Zusammenfassung von Slots nach Abschnitt und Verkehrstagen
+// @route   GET /api/slots/counter
+exports.getSlotCounterSummary = async (req, res) => {
+    try {
+        const summary = await Slot.aggregate([
+            // Stufe 1: Gruppiere nach den definierenden Eigenschaften eines Slot-Musters
+            {
+                $group: {
+                    _id: {
+                        von: "$von",
+                        bis: "$bis",
+                        abfahrt: "$Abfahrt",
+                        ankunft: "$Ankunft",
+                        verkehrsart: "$Verkehrsart",
+                        abschnitt: "$Abschnitt"
+                    },
+                    // Sammle für jedes Muster die Kalenderwoche und den Verkehrstag
+                    kws: { $push: { kw: "$Kalenderwoche", vt: "$Verkehrstag" } }
+                }
+            },
+            // Stufe 2: Formatiere das Ergebnis und trenne die KWs nach Verkehrstag
+            {
+                $project: {
+                    _id: 0, // Die technische _id entfernen
+                    slotMuster: "$_id", // Das Gruppierungsobjekt umbenennen
+                    kwsMoFr: { // Filtere alle KWs für Mo-Fr
+                        $filter: { input: "$kws", as: "item", cond: { $eq: ["$$item.vt", "Mo-Fr"] } }
+                    },
+                    kwsSaSo: { // Filtere alle KWs für Sa+So
+                        $filter: { input: "$kws", as: "item", cond: { $eq: ["$$item.vt", "Sa+So"] } }
+                    }
+                }
+            },
+            {
+                $project: {
+                    slotMuster: 1,
+                    anzahlMoFr: { $size: "$kwsMoFr" },
+                    kwsMoFr: "$kwsMoFr.kw", // Extrahiere nur die KW-Nummern
+                    anzahlSaSo: { $size: "$kwsSaSo" },
+                    kwsSaSo: "$kwsSaSo.kw" // Extrahiere nur die KW-Nummern
+                }
+            },
+            // Stufe 3: Gruppiere das Ergebnis nach Abschnitt für die Tabellen im Frontend
+            {
+                $group: {
+                    _id: "$slotMuster.abschnitt",
+                    slotTypen: { $push: "$$ROOT" } // Füge das ganze Dokument der Zeile zum Array hinzu
+                }
+            },
+            // --- ZWISCHENSTUFEN FÜR DIE SORTIERUNG ---
+            // Stufe 3a: "Entpacke" das slotTypen-Array, um auf die inneren Werte zugreifen zu können
+            { $unwind: "$slotTypen" },
+
+            // Stufe 3b: Sortiere die entpackten Dokumente nach der Abfahrtszeit
+            { 
+                $sort: {
+                    "slotTypen.slotMuster.abfahrt.stunde": 1,
+                    "slotTypen.slotMuster.abfahrt.minute": 1
+                } 
+            },
+
+            // Stufe 3c: Gruppiere die jetzt sortierten Dokumente wieder nach Abschnitt
+            {
+                $group: {
+                    _id: "$_id", // Der Abschnittsname ist jetzt in der _id
+                    slotTypen: { $push: "$slotTypen" } // Füge die sortierten slotTypen wieder zu einem Array zusammen
+                }
+            },
+            // Stufe 4: Finale Formatierung und Sortierung
+            {
+                $project: {
+                    _id: 0,
+                    abschnitt: "$_id",
+                    slotTypen: 1
+                }
+            },
+            {
+                $sort: { abschnitt: 1 }
+            }
+        ]);
+
+        res.status(200).json({
+            message: 'Slot-Zusammenfassung nach Pfad erfolgreich abgerufen.',
+            data: summary
+        });
+
+    } catch (error) {
+        console.error('Fehler bei der Erstellung der Slot-Zusammenfassung:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
+    }
+};

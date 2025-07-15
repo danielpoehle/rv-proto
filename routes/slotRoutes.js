@@ -20,6 +20,11 @@ router.post('/massen-erstellung', slotController.createSlotsBulk);
 // @access  Admin (angenommen)
 router.get('/summary', slotController.getSlotSummary);
 
+// ROUTE für die Slot-Zusammenfassung nach Abschnitt
+// @route   GET /api/slots/counter
+// @desc    Liefert eine aggregierte Zusammenfassung von Slots nach Abschnitt und Verkehrstagen
+router.get('/counter', slotController.getSlotCounterSummary);
+
 // @route   GET /api/slots
 // @desc    Ruft alle Slots ab (mit Filter- und Sortiermöglichkeiten)
 // @access  Public/Admin
