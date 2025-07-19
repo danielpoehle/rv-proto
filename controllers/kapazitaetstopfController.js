@@ -234,8 +234,8 @@ exports.deleteKapazitaetstopf = async (req, res) => {
         }
 
         // Sicherheitsprüfung 2: Wird der Topf noch von Slots referenziert?
-        // Dies prüft das Feld KapazitaetstopfReferenzen in den Slot-Dokumenten.
-        const referencingSlots = await Slot.find({ KapazitaetstopfReferenzen: topf._id }).limit(1); // limit(1) für Performance, wir brauchen nur wissen, OB es welche gibt
+        // Dies prüft das Feld VerweisAufTopf in den Slot-Dokumenten.
+        const referencingSlots = await Slot.find({ VerweisAufTopf: topf._id }).limit(1); // limit(1) für Performance, wir brauchen nur wissen, OB es welche gibt
         if (referencingSlots.length > 0) {
             return res.status(409).json({
                 message: `Kapazitätstopf kann nicht gelöscht werden, da er noch von mindestens einem Slot (z.B. Slot-ID: ${referencingSlots[0].SlotID_Sprechend || referencingSlots[0]._id}) referenziert wird.`
