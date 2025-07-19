@@ -13,6 +13,33 @@ const ZEITFENSTER_SEQUENZ = [
     '13-15', '15-17', '17-19', '19-21', '21-23', '23-01'
 ];
 
+// Definiere alle Status, die ein FINALES Ergebnis der Topf-Phase darstellen
+const finaleTopfStatus = [
+    'bestaetigt_topf',
+    'bestaetigt_topf_entgelt',
+    'bestaetigt_topf_hoechstpreis',
+    'abgelehnt_topf_verzichtet',
+    'abgelehnt_topf_verschoben',
+    'abgelehnt_topf_entgelt',
+    'abgelehnt_topf_marktanteil',
+    'abgelehnt_topf_hoechstpreis',
+    'abgelehnt_topf_hoechstpreis_ungueltig',
+    'abgelehnt_topf_hoechstpreis_kein_gebot'
+];
+
+// Definiere alle Status, die ein FINALES Ergebnis der Slot-Phase darstellen
+const finaleSlotStatus = [
+    'bestaetigt_slot',                  
+    'bestaetigt_slot_entgelt',          
+    'bestaetigt_slot_hoechstpreis',     
+    'abgelehnt_slot_verzichtet',        
+    'abgelehnt_slot_verschoben',        
+    'abgelehnt_slot_entgelt',           
+    'abgelehnt_slot_hoechstpreis',      
+    'abgelehnt_slot_hoechstpreis_ungueltig', 
+    'abgelehnt_slot_hoechstpreis_kein_gebot'
+];
+
 // Diese Funktion vergleicht, ob alle IDs der Anfragen identisch sind.
 function sindObjectIdArraysGleich(arr1, arr2) {
     if (!arr1 && !arr2) return true; // Beide null oder undefined sind gleich
@@ -64,6 +91,13 @@ function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloes
                     zuweisung.topfKonfliktDoku = konfliktDokuId; // Setze ID
                     anfrageModifiziert = true;
                 }
+                // Wenn der neue Status ein finaler Topf-Status ist, speichere ihn auch im Snapshot-Feld.
+                if (finaleTopfStatus.includes(neuerEinzelStatus)) {
+                    if (zuweisung.finalerTopfStatus !== neuerEinzelStatus) {
+                        zuweisung.finalerTopfStatus = neuerEinzelStatus;
+                        anfrageModifiziert = true;
+                    }
+                }
             }
         }
     }
@@ -100,6 +134,13 @@ function updateAnfrageEinzelSlotStatus(anfrageDoc, slotId, neuerStatus, konflikt
                 zuweisung.slotKonfliktDoku = konfliktDokuId;
                 anfrageModifiziert = true;
             }
+            // Wenn der neue Status ein finaler Slot-Status ist, speichere ihn auch im Snapshot-Feld.
+                if (finaleSlotStatus.includes(neuerStatus)) {
+                    if (zuweisung.finalerSlotStatus !== neuerStatus) {
+                        zuweisung.finalerSlotStatus = neuerStatus;
+                        anfrageModifiziert = true;
+                    }
+                }
             break; // Wir haben den Eintrag gefunden
         }
     }

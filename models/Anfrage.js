@@ -62,6 +62,7 @@ const zugewiesenerSlotMitStatusSchema = new Schema({
         required: true,
         enum: [
             'entscheidung_ausstehend',          // Im Topf-Konflikt noch nicht final entschieden
+            'bestaetigt_topf',                  // Hat Kapazität im Topf-Konflikt erhalten (allgemein oder nach Verzicht)
             'bestaetigt_topf_entgelt',          // Im Topf-Konflikt durch Entgelt zugewiesen
             'bestaetigt_topf_hoechstpreis',     // Im Topf-Konflikt durch Höchstpreis zugewiesen
             'abgelehnt_topf_verzichtet',        // Für diesen Topf-Konflikt verzichtet (Anfrage hat verzichtet)
@@ -71,6 +72,23 @@ const zugewiesenerSlotMitStatusSchema = new Schema({
             'abgelehnt_topf_hoechstpreis',      // Im Topf-Konflikt bei Höchstpreis unterlegen
             'abgelehnt_topf_hoechstpreis_ungueltig', // im Topf Höchstpreisverfahren ungültiges Gebot abgegeben
             'abgelehnt_topf_hoechstpreis_kein_gebot', //im Topf Höchstpreisverfahren kein Gebot abgegeben            
+        ],
+        default: 'entscheidung_ausstehend'
+    },
+    finalerSlotStatus: {
+        type: String,
+        required: true,
+        enum: [
+            'entscheidung_ausstehend',          // Im Topf-Konflikt noch nicht final entschieden
+            'bestaetigt_slot',                  // Hat Kapazität im Slot-Konflikt erhalten (allgemein oder nach Verzicht)
+            'bestaetigt_slot_entgelt',          // Im Slot-Konflikt durch Entgelt zugewiesen
+            'bestaetigt_slot_hoechstpreis',     // Im Slot-Konflikt durch Höchstpreis zugewiesen
+            'abgelehnt_slot_verzichtet',        // Für diesen Slot-Konflikt verzichtet (Anfrage hat verzichtet)
+            'abgelehnt_slot_verschoben',        // Slot wird nach Slot-Koordinierung nicht mehr benötigt, da verschoben
+            'abgelehnt_slot_entgelt',           // Im Slot-Konflikt wegen Entgelt abgelehnt
+            'abgelehnt_slot_hoechstpreis',      // Im Slot-Konflikt bei Höchstpreis unterlegen
+            'abgelehnt_slot_hoechstpreis_ungueltig', // im Slot Höchstpreisverfahren ungültiges Gebot abgegeben
+            'abgelehnt_slot_hoechstpreis_kein_gebot', //im Slot Höchstpreisverfahren kein Gebot abgegeben
         ],
         default: 'entscheidung_ausstehend'
     },
