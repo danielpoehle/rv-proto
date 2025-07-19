@@ -386,6 +386,16 @@ exports.deleteSlot = async (req, res) => {
             });
         }
 
+        // 2. Aufräumen: Entferne die Slots aus den Kapazitätstöpfen
+        // WICHTIG: .deleteMany() löst KEINE Mongoose-Hooks aus! Wir müssen die Logik aus dem
+        // pre('deleteOne')-Hook hier manuell ausführen.
+        const toepfeToUpdate = await Kapazitaetstopf.find({ ListeDerSlots: { $in: [slot._id] } });
+        for (const topf of toepfeToUpdate) {
+            topf.ListeDerSlots.pull(slot._id);
+            topf.maxKapazitaet = Math.floor(0.7 * topf.ListeDerSlots.length);
+            await topf.save();
+        }
+
         // Wenn keine zugewiesenen Anfragen, dann Slot löschen
         // Die Methode .deleteOne() ist für das Dokument-Objekt selbst
         await slot.deleteOne();
@@ -594,7 +604,8 @@ exports.getSlotCounterSummary = async (req, res) => {
                         abfahrt: "$Abfahrt",
                         ankunft: "$Ankunft",
                         verkehrsart: "$Verkehrsart",
-                        abschnitt: "$Abschnitt"
+                        abschnitt: "$Abschnitt",
+                        linie: "$Linienbezeichnung"
                     },
                     // Sammle für jedes Muster die Kalenderwoche und den Verkehrstag
                     kws: { $push: { kw: "$Kalenderwoche", vt: "$Verkehrstag" } }
@@ -669,5 +680,83 @@ exports.getSlotCounterSummary = async (req, res) => {
     } catch (error) {
         console.error('Fehler bei der Erstellung der Slot-Zusammenfassung:', error);
         res.status(500).json({ message: 'Serverfehler bei der Erstellung der Zusammenfassung.' });
+    }
+};
+
+// @desc    Ruft alle Slots ab, die zu einer gemeinsamen Linie mit einer bestimmmten Abfahrtzeit auf einem Abschnitt gehören
+// @route   GET /api/slots/by-muster
+exports.getSlotsByMuster = async (req, res) => {
+    try {
+        const { von, bis, abfahrtStunde, abfahrtMinute, ankunftStunde, ankunftMinute, Verkehrsart, Abschnitt } = req.query;
+
+        // Baue eine exakte Übereinstimmungsabfrage
+        const matchQuery = {
+            von, bis, Abschnitt, Verkehrsart,
+            'Abfahrt.stunde': parseInt(abfahrtStunde),
+            'Abfahrt.minute': parseInt(abfahrtMinute),
+            'Ankunft.stunde': parseInt(ankunftStunde),
+            'Ankunft.minute': parseInt(ankunftMinute),
+        };
+
+        //console.log('DEBUG: Suche Slots mit folgender exakter Query:', matchQuery);
+
+
+        const slots = await Slot.find(matchQuery)
+                                .select('SlotID_Sprechend zugewieseneAnfragen Kalenderwoche Verkehrstag')
+                                .sort({ Kalenderwoche: 1, Verkehrstag: 1 });
+
+        //console.log(`DEBUG: ${slots.length} Slots gefunden.`);
+
+        res.status(200).json({ data: slots });
+    } catch (error) {
+        res.status(500).json({ message: 'Serverfehler beim Abrufen der Slots nach Muster.' });
+    }
+};
+
+// @desc    Löscht mehrere Slots basierend auf den übergebenden IDs der Slots
+// @route   POST /api/slots/bulk-delete
+exports.deleteSlotsBulk = async (req, res) => {
+    const { slotIdsToDelete } = req.body;
+
+    if (!slotIdsToDelete || !Array.isArray(slotIdsToDelete) || slotIdsToDelete.length === 0) {
+        return res.status(400).json({ message: 'Ein Array von slotIdsToDelete ist erforderlich.' });
+    }
+
+    try {
+        // 1. Sicherheitsprüfung: Stelle sicher, dass ALLE zu löschenden Slots keine zugewiesenen Anfragen haben.
+        const slotsToVerify = await Slot.find({ _id: { $in: slotIdsToDelete } }).select('zugewieseneAnfragen SlotID_Sprechend');
+
+        if(slotsToVerify.length !== slotIdsToDelete.length) {
+            return res.status(404).json({ message: 'Einige der zu löschenden Slots wurden nicht gefunden.' });
+        }
+        
+        const belegteSlots = slotsToVerify.filter(s => s.zugewieseneAnfragen && s.zugewieseneAnfragen.length > 0);
+        if (belegteSlots.length > 0) {
+            return res.status(409).json({
+                message: 'Löschen nicht möglich. Mindestens ein ausgewählter Slot ist noch Anfragen zugewiesen.',
+                details: belegteSlots.map(s => s.SlotID_Sprechend)
+            });
+        }
+        
+        // 2. Aufräumen: Entferne die Slots aus den Kapazitätstöpfen
+        // WICHTIG: .deleteMany() löst KEINE Mongoose-Hooks aus! Wir müssen die Logik aus dem
+        // pre('deleteOne')-Hook hier manuell ausführen.
+        const toepfeToUpdate = await Kapazitaetstopf.find({ ListeDerSlots: { $in: slotIdsToDelete } });
+        for (const topf of toepfeToUpdate) {
+            topf.ListeDerSlots.pull(...slotIdsToDelete);
+            topf.maxKapazitaet = Math.floor(0.7 * topf.ListeDerSlots.length);
+            await topf.save();
+        }
+        
+        // 3. Führe die Massenlöschung durch
+        const deleteResult = await Slot.deleteMany({ _id: { $in: slotIdsToDelete } });
+
+        res.status(200).json({
+            message: `${deleteResult.deletedCount} Slots erfolgreich gelöscht.`,
+            data: { deletedCount: deleteResult.deletedCount }
+        });
+    } catch (error) {
+        console.error('Fehler beim Massenlöschen von Slots:', error);
+        res.status(500).json({ message: 'Serverfehler beim Massenlöschen.' });
     }
 };

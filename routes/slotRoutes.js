@@ -14,6 +14,12 @@ router.post('/', slotController.createSlot);
 // @access  Admin (angenommen)
 router.post('/massen-erstellung', slotController.createSlotsBulk);
 
+// ROUTE für Massenlöschung
+// @route   POST /api/slots/bulk-delete
+// @desc    Löscht mehrere Slots basierend auf den übergebenden IDs der Slots
+// @access  Admin (angenommen)
+router.post('/bulk-delete', slotController.deleteSlotsBulk);
+
 // ROUTE für die statistische Zusammenfassung der Slots
 // @route   GET /api/slots/summary
 // @desc    Liefert eine aggregierte Zusammenfassung aller Slots
@@ -24,6 +30,11 @@ router.get('/summary', slotController.getSlotSummary);
 // @route   GET /api/slots/counter
 // @desc    Liefert eine aggregierte Zusammenfassung von Slots nach Abschnitt und Verkehrstagen
 router.get('/counter', slotController.getSlotCounterSummary);
+
+// ROUTE zum Abrufen von Slots nach Muster
+// @route   GET /api/slots/by-muster
+// @desc    Ruft alle Slots ab, die zu einer gemeinsamen Linie mit einer bestimmmten Abfahrtzeit auf einem Abschnitt gehören
+router.get('/by-muster', slotController.getSlotsByMuster);
 
 // @route   GET /api/slots
 // @desc    Ruft alle Slots ab (mit Filter- und Sortiermöglichkeiten)
