@@ -1437,7 +1437,8 @@ exports.getKonfliktById = async (req, res) => {
                 { path: 'abgelehnteAnfragenEntgeltvergleich', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
                 { path: 'abgelehnteAnfragenHoechstpreis', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
                 { path: 'ListeAnfragenMitVerzicht', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
-                { path: 'ListeAnfragenVerschubKoordination.anfrage', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' }
+                { path: 'ListeAnfragenVerschubKoordination.anfrage', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },
+                { path: 'abgelehnteAnfragenMarktanteil', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' }
             ])
             .lean();
 
