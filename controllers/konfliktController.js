@@ -40,9 +40,10 @@ function sindObjectIdArraysGleich(arr1, arr2) {
  * @param {Document} anfrageDoc - Das bereits geladene und populierte Anfrage-Dokument.
  * @param {string} neuerEinzelStatus - Der neue Status für die relevanten Slot-Zuweisungen.
  * @param {ObjectId} ausloesenderTopfObjectId - Die ObjectId des Kapazitätstopfes, für den diese Entscheidung gilt.
+ * @param {ObjectId|null} [konfliktDokuId=null] - Die ID des Topf-Konfliktdokuments
  * @returns {Promise<Anfrage|null>} Das aktualisierte Anfrage-Objekt oder null bei Fehler.
  */
-function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloesenderTopfObjectId) {    
+function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloesenderTopfObjectId, konfliktDokuId = null) {    
 
     if (!anfrageDoc || !anfrageDoc.ZugewieseneSlots) {
         console.warn(`Anfrage-Dokument für Update ungültig: ${anfrageDoc?._id} für updateAnfrageSlotsStatusFuerTopf`);
@@ -56,6 +57,11 @@ function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloes
             if (zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(ausloesenderTopfObjectId)) {
                 if (zuweisung.statusEinzelzuweisung !== neuerEinzelStatus) {
                     zuweisung.statusEinzelzuweisung = neuerEinzelStatus;
+                    anfrageModifiziert = true;
+                }
+                // Setze oder aktualisiere die Konflikt-Doku-ID
+                if (konfliktDokuId && zuweisung.topfKonfliktDoku !== konfliktDokuId) {
+                    zuweisung.topfKonfliktDoku = konfliktDokuId; // Setze ID
                     anfrageModifiziert = true;
                 }
             }
@@ -76,9 +82,10 @@ function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloes
  * @param {Document} anfrageDoc - Das bereits geladene und ggf. populierte Anfrage-Dokument.
  * @param {ObjectId|string} slotId - Der Slot, dessen Zuweisungsstatus geändert wird.
  * @param {string} neuerStatus - Der neue statusEinzelzuweisung
+ * @param {ObjectId|null} [konfliktDokuId=null] - Die ID des Slot-Konfliktdokuments
  * @returns Promise<Anfrage|null>} Das aktualisierte Anfrage-Objekt oder null bei Fehler.
  */
-function updateAnfrageEinzelSlotStatus(anfrageDoc, slotId, neuerStatus) {    
+function updateAnfrageEinzelSlotStatus(anfrageDoc, slotId, neuerStatus, konfliktDokuId = null) {    
     if (!anfrageDoc || !anfrageDoc.ZugewieseneSlots) return null;
 
     let anfrageModifiziert = false;
@@ -86,6 +93,11 @@ function updateAnfrageEinzelSlotStatus(anfrageDoc, slotId, neuerStatus) {
         if (zuweisung.slot && zuweisung.slot._id.equals(slotId)) {
             if (zuweisung.statusEinzelzuweisung !== neuerStatus) {
                 zuweisung.statusEinzelzuweisung = neuerStatus;
+                anfrageModifiziert = true;
+            }
+            // Setze oder aktualisiere die Konflikt-Doku-ID
+            if (konfliktDokuId && zuweisung.slotKonfliktDoku !== konfliktDokuId) {
+                zuweisung.slotKonfliktDoku = konfliktDokuId;
                 anfrageModifiziert = true;
             }
             break; // Wir haben den Eintrag gefunden
@@ -941,7 +953,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                         
                         // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                         for (const anfrage of topf.ListeDerAnfragen) {
-                            await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id);
+                            await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id, konfliktDoku._id);
                             anfragenToSave.set(anfrage._id.toString(), anfrage);
                         }
                     } else { // Anfragen im Topf sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist
@@ -961,7 +973,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                     
                     // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                     for (const anfrage of topf.ListeDerAnfragen) {
-                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id);
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id, neuesKonfliktDoku._id);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
 
@@ -978,7 +990,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                 if(offenerKonflikt && offenerKonflikt.status !== 'geloest'){
                     // Alle Anfragen in diesem Topf sind für die Slots dieses Topfes "bestätigt" (auf Topf-Ebene)
                     for (const anfrage of topf.ListeDerAnfragen) {
-                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id);
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id, offenerKonflikt._id);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Konflikt ${offenerKonflikt._id} für Topf ${topf.TopfID} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
@@ -1003,7 +1015,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                             'fehlende_Plausi'
                         ];
                         if(slotKonfliktOderSpaeter.includes(anfrage.Status)) continue;
-                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id);
+                        await updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf', topf._id, null);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Topf ${topf.TopfID} hatte keinen Konflikt und die Anfragen werden automatisch auf 'bestaetigt_topf' gesetzt, da keine Überbuchung besteht.`);
@@ -1165,7 +1177,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                         
                         // Alle Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_slot'
                         for (const anfrage of aktiveUndEntschiedeneAnfragenFuerSlot) {
-                            await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot');
+                            await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot', konfliktDoku._id);
                             anfragenToSave.set(anfrage._id.toString(), anfrage);
                         }
                     }else { // Anfragen im Slot sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist
@@ -1185,7 +1197,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
 
                     // Alle aktiven Anfragen in diesem überbuchten Slot erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                     for (const anfrage of aktiveUndEntschiedeneAnfragenFuerSlot) {
-                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot');
+                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'wartet_konflikt_slot', neuesKonfliktDoku._id);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
 
@@ -1203,7 +1215,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 if(offenerKonflikt && offenerKonflikt.status !== 'geloest'){
                     // Die eine aktive Anfrage in diesem Slot wird "bestätigt" (auf Slot-Ebene)
                     for (const anfrage of aktiveAnfragenFuerSlot) {
-                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'bestaetigt_slot');
+                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'bestaetigt_slot', offenerKonflikt._id);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Konflikt ${offenerKonflikt._id} für Slot ${slot.SlotID_Sprechend || slot._id} wird automatisch gelöst, da keine Überbuchung mehr besteht.`);
@@ -1218,7 +1230,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 // Wenn keine Konfliktdoku existiert, dann war der Topf nie überbucht und kann gelöst werden
                 if(!offenerKonflikt){
                     for (const anfrage of aktiveAnfragenFuerSlot) {
-                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'bestaetigt_slot');
+                        await updateAnfrageEinzelSlotStatus(anfrage, slot._id, 'bestaetigt_slot', null);
                         anfragenToSave.set(anfrage._id.toString(), anfrage);
                     }
                     console.log(`Slot ${slot.SlotID_Sprechend || slot._id} hatte keinen Konflikt und die Anfragen werden automatisch auf 'bestaetigt_slot' gesetzt, da keine Überbuchung besteht.`);
@@ -1377,7 +1389,7 @@ exports.getKonfliktById = async (req, res) => {
                 }
             })
             // Populiere den auslösenden Slot (falls vorhanden)
-            .populate('ausloesenderSlot', 'SlotID_Sprechend von bis Abschnitt')
+            .populate('ausloesenderSlot', 'SlotID_Sprechend von bis Abschnitt Linienbezeichnung zugewieseneAnfragen')
             .populate([
                 { path: 'beteiligteAnfragen', select: 'AnfrageID_Sprechend EVU Zugnummer Status Verkehrsart Entgelt' },
                 { path: 'zugewieseneAnfragen', select: 'AnfrageID_Sprechend EVU Zugnummer Verkehrsart' },

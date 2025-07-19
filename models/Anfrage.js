@@ -56,6 +56,33 @@ const zugewiesenerSlotMitStatusSchema = new Schema({
             'bestaetigt_slot_nachgerückt',      // Slot konnte im Nachrückerverfahren zugewiesen werden
         ],
         default: 'initial_in_konfliktpruefung_topf'
+    },
+    finalerTopfStatus: {
+        type: String,
+        required: true,
+        enum: [
+            'entscheidung_ausstehend',          // Im Topf-Konflikt noch nicht final entschieden
+            'bestaetigt_topf_entgelt',          // Im Topf-Konflikt durch Entgelt zugewiesen
+            'bestaetigt_topf_hoechstpreis',     // Im Topf-Konflikt durch Höchstpreis zugewiesen
+            'abgelehnt_topf_verzichtet',        // Für diesen Topf-Konflikt verzichtet (Anfrage hat verzichtet)
+            'abgelehnt_topf_verschoben',        // Slot wird nach Topf-Koordinierung nicht mehr benötigt, da verschoben
+            'abgelehnt_topf_entgelt',           // Im Topf-Konflikt wegen Entgelt abgelehnt
+            'abgelehnt_topf_marktanteil',       // Im Topf-Konflikt wegen mehr als 80% Marktanteil der 70% RV-Kapazität abgelehnt
+            'abgelehnt_topf_hoechstpreis',      // Im Topf-Konflikt bei Höchstpreis unterlegen
+            'abgelehnt_topf_hoechstpreis_ungueltig', // im Topf Höchstpreisverfahren ungültiges Gebot abgegeben
+            'abgelehnt_topf_hoechstpreis_kein_gebot', //im Topf Höchstpreisverfahren kein Gebot abgegeben            
+        ],
+        default: 'entscheidung_ausstehend'
+    },
+    topfKonfliktDoku: { // Verweis auf das Konfliktdokument, falls diese Zuweisung in einem Topf-Konflikt ist
+        type: Schema.Types.ObjectId,
+        ref: 'KonfliktDokumentation',
+        default: null
+    },
+    slotKonfliktDoku: { // Verweis auf das Konfliktdokument, falls diese Zuweisung in einem Slot-Konflikt ist
+        type: Schema.Types.ObjectId,
+        ref: 'KonfliktDokumentation',
+        default: null
     }
     // Man könnte hier noch Referenzen hinzufügen, z.B. auf das KonfliktDokument, das zu einer Entscheidung geführt hat
 }, { _id: false });

@@ -153,6 +153,8 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             let anfrage5 = await Anfrage.findOne({Zugnummer: `C5`});
             expect(anfrage5.Status).toBe('vollstaendig_bestaetigt_topf');
             expect(anfrage5.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage5.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anfrage5.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
 
             kt_NoConflict2 = await Kapazitaetstopf.findById(kt_NoConflict2._id);
             expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1);
@@ -193,18 +195,30 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             //console.log(anfrage4);
             expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
             expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[1]);
             expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
             expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[2]);
             expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
             expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[3]);
             expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_topf');
             expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anfrage4.Status).toBe('in_konfliktloesung_topf');
             expect(anfrage4.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage4.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
+            expect(anfrage4.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anfrage4.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage4.ZugewieseneSlots[1].topfKonfliktDoku).toBe(null);
+            expect(anfrage4.ZugewieseneSlots[1].slotKonfliktDoku).toBe(null);
             
 
             expect(konfliktDokuDB.zugewieseneAnfragen).toEqual([]);
@@ -300,18 +314,28 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             expect(anf1.ZugewieseneSlots).not.toBeNull();
             expect(anf1.ZugewieseneSlots).toHaveLength(1);
             expect(anf1.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf1.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
+            expect(anf1.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anf2.ZugewieseneSlots).not.toBeNull();
             expect(anf2.ZugewieseneSlots).toHaveLength(1);
             expect(anf2.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf2.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
+            expect(anf2.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anf3.ZugewieseneSlots).not.toBeNull();
             expect(anf3.ZugewieseneSlots).toHaveLength(1);
             expect(anf3.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf3.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
+            expect(anf3.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anf4.ZugewieseneSlots).not.toBeNull();
             expect(anf4.ZugewieseneSlots).toHaveLength(2);
             expect(anf4.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf4.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
+            expect(anf4.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anf5.ZugewieseneSlots).not.toBeNull();
             expect(anf5.ZugewieseneSlots).toHaveLength(1);
             expect(anf5.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_topf');
+            expect(anf5.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
+            expect(anf5.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
 
             // Resolution-Felder sollten zurückgesetzt sein
             expect(konfliktDoku_final.zugewieseneAnfragen).toEqual([]);
@@ -1578,6 +1602,8 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             //console.log(anfrage5);
             expect(anfrage5.Status).toBe('vollstaendig_final_bestaetigt');
             expect(anfrage5.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage5.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anfrage5.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
 
             
         });
@@ -1620,12 +1646,20 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             //console.log(anfrage4);
             expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_slot');
             expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].slotKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
             beteiligteAnfrage = await Anfrage.findById(beteiligteAnfragenStringsDB[1]);
             expect(beteiligteAnfrage.Status).toBe('in_konfliktloesung_slot');
-            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');          
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(beteiligteAnfrage.ZugewieseneSlots[0].slotKonfliktDoku.toString()).toBe(konfliktDokuId.toString());          
             expect(anfrage4.Status).toBe('in_konfliktloesung_slot');
             expect(anfrage4.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_slot');
+            expect(anfrage4.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anfrage4.ZugewieseneSlots[0].slotKonfliktDoku.toString()).toBe(konfliktDokuId.toString());
             expect(anfrage4.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage4.ZugewieseneSlots[1].topfKonfliktDoku).toBe(null);
+            expect(anfrage4.ZugewieseneSlots[1].slotKonfliktDoku).toBe(null);
             
 
             expect(konfliktDokuDB.zugewieseneAnfragen).toEqual([]);
@@ -1729,14 +1763,20 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             expect(anf1.ZugewieseneSlots).not.toBeNull();
             expect(anf1.ZugewieseneSlots).toHaveLength(1);
             expect(anf1.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_slot');
+            expect(anf1.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anf1.ZugewieseneSlots[0].slotKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
 
             expect(anf2.ZugewieseneSlots).not.toBeNull();
             expect(anf2.ZugewieseneSlots).toHaveLength(2);
             expect(anf2.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_slot');
+            expect(anf2.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anf2.ZugewieseneSlots[0].slotKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
 
             expect(anf3.ZugewieseneSlots).not.toBeNull();
             expect(anf3.ZugewieseneSlots).toHaveLength(1);
             expect(anf3.ZugewieseneSlots[0].statusEinzelzuweisung).toEqual('wartet_konflikt_slot');
+            expect(anf3.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anf3.ZugewieseneSlots[0].slotKonfliktDoku.toString()).toBe(konfliktDoku_final._id.toString());
 
             // Resolution-Felder sollten zurückgesetzt sein
             expect(konfliktDoku_final.zugewieseneAnfragen).toEqual([]);
