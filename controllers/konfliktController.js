@@ -129,6 +129,7 @@ function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfragenMit
             if (anfrageDoc) {
                 const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageDoc, 'abgelehnt_topf_verzichtet', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} hat verzichtet.`;
             }            
         }
     }
@@ -143,6 +144,7 @@ function resolveVerzichtVerschubForSingleTopfConflict(konflikt, listeAnfragenMit
             if (anfrageDoc) {                
                 const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageDoc, 'abgelehnt_topf_verschoben', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} wurde verschoben.`;
             }            
         }
     }
@@ -223,6 +225,7 @@ function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfragenMit
         if(anfrageDoc){
             const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageDoc, ausloesenderSlotId, 'abgelehnt_slot_verzichtet');
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} hat verzichtet.`;
         }        
     }
     for (const item of konflikt.ListeAnfragenVerschubKoordination) {
@@ -230,6 +233,7 @@ function resolveVerzichtVerschubForSingleSlotConflict(konflikt, listeAnfragenMit
         if(anfrageDoc){
             const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageDoc, ausloesenderSlotId, 'abgelehnt_slot_verschoben');
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} wurde verschoben.`;
         }        
     }
     
@@ -422,6 +426,7 @@ function resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen = {
                     konflikt.zugewieseneAnfragen.push(anfrageItem.anfrage._id);
                     let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'bestaetigt_topf_entgelt', ausloesenderTopfId);
                     if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                    konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} gewinnt im Entgeltvergleich.`;
                 }
             } else {
                 // **Fall 2: Der Block passt NICHT mehr komplett rein.**
@@ -438,6 +443,7 @@ function resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen = {
                         konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
                         let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
                         if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} unterliegt im Entgeltvergleich.`;
                     }
                 }
             }
@@ -452,6 +458,7 @@ function resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen = {
                     konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
                     let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageItem.anfrage, 'abgelehnt_topf_entgelt', ausloesenderTopfId);
                     if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                    konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} unterliegt im Entgeltvergleich.`;
                 }
                 break; // Schleife beenden
             }
@@ -463,6 +470,7 @@ function resolveEntgeltvergleichForSingleTopfConflict(konflikt, evuReihungen = {
             for (const anfrage of anfragenFuerHoechstpreis) {
                 let updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} geht in das Höchstpreisverfahren.`;
             }
             konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Entgeltvergleich am ${new Date().toLocaleString()} führte zu Gleichstand. Höchstpreisverfahren für ${anfragenFuerHoechstpreis.length} Anfragen eingeleitet.`;
         } else { // Kein Gleichstand, Konflikt durch Entgelt gelöst
@@ -538,6 +546,7 @@ function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
             for (const anfrageItem of kandidatenMitHoechstemEntgelt) {
                 const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'wartet_hoechstpreis_slot');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} geht in das Höchstpreisverfahren.`;
             }
             // Alle anderen mit geringerem Entgelt werden direkt abgelehnt
             const anfragenMitGeringeremEntgelt = konflikt.ReihungEntgelt.filter(r => r.entgelt < hoechstesEntgelt);
@@ -545,6 +554,7 @@ function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
                 konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
                 const updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'abgelehnt_slot_entgelt');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} unterliegt im Entgeltvergleich.`;
             }
             konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Entgeltvergleich am ${new Date().toLocaleString()} führte zu Gleichstand. Höchstpreisverfahren für ${kandidatenMitHoechstemEntgelt.length} Anfragen eingeleitet.`;
 
@@ -554,6 +564,7 @@ function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
             konflikt.zugewieseneAnfragen.push(gewinnerAnfrage._id);
             const updatedGewinner = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot_entgelt');
             if(updatedGewinner) anfragenToSave.set(updatedGewinner._id.toString(), updatedGewinner);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedGewinner.AnfrageID_Sprechend} gewinnt im Entgeltvergleich.`;
 
             // Alle anderen ablehnen
             const verliererAnfragen = konflikt.ReihungEntgelt.slice(1);
@@ -561,6 +572,7 @@ function resolveEntgeltvergleichForSingleSlotConflict(konflikt) {
                 konflikt.abgelehnteAnfragenEntgeltvergleich.push(anfrageItem.anfrage._id);
                 const updatedVerlierer = updateAnfrageEinzelSlotStatus(anfrageItem.anfrage, ausloesenderSlotId, 'abgelehnt_slot_entgelt');
                 if(updatedVerlierer) anfragenToSave.set(updatedVerlierer._id.toString(), updatedVerlierer);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedVerlierer.AnfrageID_Sprechend} unterliegt im Entgeltvergleich.`;
             }
             konflikt.status = 'geloest';
             konflikt.abschlussdatum = new Date();
@@ -623,11 +635,13 @@ function resolveHoechstpreisForSingleTopfConflict(konflikt, listeGeboteHoechstpr
                 anfragenOhneValidesGebot.push(anfrageKandidat._id);
                 const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageKandidat, 'abgelehnt_topf_hoechstpreis_ungueltig', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} hat kein gültiges Angebot abgegeben.`;
             }
         } else {
             anfragenOhneValidesGebot.push(anfrageKandidat._id);
             const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrageKandidat, 'abgelehnt_topf_hoechstpreis_kein_gebot', ausloesenderTopfId);
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} hat kein Angebot abgegeben.`;
         }
     }
     // Füge Anfragen ohne valides Gebot direkt zu den abgelehnten im Konfliktdokument hinzu
@@ -680,6 +694,7 @@ function resolveHoechstpreisForSingleTopfConflict(konflikt, listeGeboteHoechstpr
                 neuZugewiesenInHP.push(anfrage._id);
                 const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'bestaetigt_topf_hoechstpreis', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} gewinnt im Höchstpreisverfahren.`;
                 verbleibendeKapFuerHP--;
             }
         } else { // Keine Kapazität mehr
@@ -687,6 +702,7 @@ function resolveHoechstpreisForSingleTopfConflict(konflikt, listeGeboteHoechstpr
                 neuAbgelehntInHPWegenKap.push(anfrage._id);
                 const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'abgelehnt_topf_hoechstpreis', ausloesenderTopfId);
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} unterliegt im Höchstpreisverfahren.`;
             }
         }
     }
@@ -705,6 +721,7 @@ function resolveHoechstpreisForSingleTopfConflict(konflikt, listeGeboteHoechstpr
         for (const anfrage of verbleibenImWartestatusHP) { // Status der Wartenden explizit setzen/bestätigen
             const updatedAnfrage = updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_hoechstpreis_topf', ausloesenderTopfId);
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} geht erneut in das Höchstpreisverfahren.`;
         }
     } else {
         konflikt.status = 'geloest';
@@ -751,11 +768,13 @@ function resolveHoechstpreisForSingleSlotConflict(konflikt, listeGeboteHoechstpr
                 konflikt.abgelehnteAnfragenHoechstpreis.push(anfrageKandidat._id);
                 let updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageKandidat, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis_ungueltig');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} hat im Höchstpreisverfahren kein gültiges Angebot abgegeben.`;
             }
         } else {
             konflikt.abgelehnteAnfragenHoechstpreis.push(anfrageKandidat._id);
             let updatedAnfrage = updateAnfrageEinzelSlotStatus(anfrageKandidat, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis_kein_gebot');
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} hat im Höchstpreisverfahren kein Angebot abgegeben.`;
         }
     }
     konflikt.markModified('abgelehnteAnfragenHoechstpreis');
@@ -776,6 +795,7 @@ function resolveHoechstpreisForSingleSlotConflict(konflikt, listeGeboteHoechstpr
         konflikt.zugewieseneAnfragen.push(gewinnerAnfrage._id);
         let updatedAnfrage = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot_hoechstpreis');
         if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+        konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} gewinnt im Höchstpreisverfahren.`;
         konflikt.status = 'geloest';
         konflikt.abschlussdatum = new Date();
     } else { // Mehr als ein valides Gebot
@@ -792,11 +812,13 @@ function resolveHoechstpreisForSingleSlotConflict(konflikt, listeGeboteHoechstpr
                 anfragenInWarteschleifeHP.push(kandidat.anfrage._id);
                 let updatedAnfrage = updateAnfrageEinzelSlotStatus(kandidat.anfrage, ausloesenderSlotId, 'wartet_hoechstpreis_slot');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} geht erneut in das Höchstpreisverfahren.`;
             }
             for (const verlierer of verliererDieserRunde) {
                 konflikt.abgelehnteAnfragenHoechstpreis.push(verlierer.anfrage._id);
                 let updatedAnfrage = updateAnfrageEinzelSlotStatus(verlierer.anfrage, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} unterliegt im Höchstpreisverfahren.`;
             }
         } else {
             // **Fall 3: Eindeutiger Höchstbietender.**
@@ -804,6 +826,7 @@ function resolveHoechstpreisForSingleSlotConflict(konflikt, listeGeboteHoechstpr
             konflikt.zugewieseneAnfragen.push(gewinnerAnfrage._id);
             let updatedAnfrage = updateAnfrageEinzelSlotStatus(gewinnerAnfrage, ausloesenderSlotId, 'bestaetigt_slot_hoechstpreis');
             if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+            konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} gewinnt im Höchstpreisverfahren.`;
             
             // Alle anderen mit validen Geboten werden abgelehnt
             const verliererAnfragen = valideGebote.slice(1);
@@ -811,6 +834,7 @@ function resolveHoechstpreisForSingleSlotConflict(konflikt, listeGeboteHoechstpr
                 konflikt.abgelehnteAnfragenHoechstpreis.push(verlierer.anfrage._id);
                 let updatedAnfrage = updateAnfrageEinzelSlotStatus(verlierer.anfrage, ausloesenderSlotId, 'abgelehnt_slot_hoechstpreis');
                 if(updatedAnfrage) anfragenToSave.set(updatedAnfrage._id.toString(), updatedAnfrage);
+                konflikt.notizen = (konflikt.notizen ? konflikt.notizen + "\n---\n" : "") + `Anfrage ${updatedAnfrage.AnfrageID_Sprechend} unterliegt im Höchstpreisverfahren.`;
             }
             konflikt.status = 'geloest';
             konflikt.abschlussdatum = new Date();
