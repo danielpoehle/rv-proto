@@ -279,7 +279,7 @@ async function resetAnfrageZuordnung(anfrageId) {
     const erlaubteResetStatus = [
         'initial_in_konfliktpruefung_topf',
         'bestaetigt_topf', // Wenn Topf konfliktfrei war, aber noch keine Slot-Konflikte geprüft wurden
-        'bestaetigt_slot' // etc.
+        'bestaetigt_slot', // Wenn Slot direkt konfliktfrei war
     ];
     const kannZurueckgesetztWerden = anfrage.ZugewieseneSlots.every(zs => 
         erlaubteResetStatus.includes(zs.statusEinzelzuweisung)

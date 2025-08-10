@@ -2911,11 +2911,12 @@ exports.resetKonfliktGruppe = async (req, res) => {
                 // Prüfe, ob der Slot zu einem der Konflikttöpfe dieser Gruppe gehört
                 if (zuweisung.slot && zuweisung.slot.VerweisAufTopf && topfIdsInConflict.includes(zuweisung.slot.VerweisAufTopf.toString())) {
                     if (zuweisung.statusEinzelzuweisung !== 'initial_in_konfliktpruefung_topf') {
-                        zuweisung.statusEinzelzuweisung = 'initial_in_konfliktpruefung_topf';
-                        anfrageModifiziert = true;
+                        zuweisung.statusEinzelzuweisung = 'initial_in_konfliktpruefung_topf';                        
                     }
+                    zuweisung.finalerTopfStatus = 'entscheidung_ausstehend';
                     // Entferne den Verweis auf das (bald gelöschte) Topf-Konfliktdokument
                     zuweisung.topfKonfliktDoku = null;
+                    anfrageModifiziert = true;
                 }
             }
             if (anfrageModifiziert) {
@@ -2994,11 +2995,12 @@ exports.resetSlotKonfliktGruppe = async (req, res) => {
                     // --- HIER IST DIE NEUE KERNLOGIK ---
                     // Setze den Einzelstatus auf den gespeicherten finalen Topf-Status zurück
                     if (zuweisung.statusEinzelzuweisung !== zuweisung.finalerTopfStatus) {
-                        zuweisung.statusEinzelzuweisung = zuweisung.finalerTopfStatus;
-                        anfrageModifiziert = true;
+                        zuweisung.statusEinzelzuweisung = zuweisung.finalerTopfStatus;                        
                     }
+                    zuweisung.finalerSlotStatus = 'entscheidung_ausstehend';
                     // Entferne den Verweis auf das (bald gelöschte) Slot-Konfliktdokument
                     zuweisung.slotKonfliktDoku = null;
+                    anfrageModifiziert = true;
                 }
             }
             if (anfrageModifiziert) {

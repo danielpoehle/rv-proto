@@ -469,6 +469,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             a1_updated.ZugewieseneSlots.forEach(zs => {
                 if (zs.slot.VerweisAufTopf.equals(kt_AutoResolve._id)) {
                     expect(zs.statusEinzelzuweisung).toBe('bestaetigt_topf');
+                    expect(zs.finalerTopfStatus).toBe('bestaetigt_topf');
                 }
             });
             expect(a1_updated.Status).toBe('vollstaendig_bestaetigt_topf'); // Annahme: updateGesamtStatus setzt dies korrekt
@@ -476,6 +477,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             a2_updated.ZugewieseneSlots.forEach(zs => {
                 if (zs.slot.VerweisAufTopf.equals(kt_AutoResolve._id)) {
                     expect(zs.statusEinzelzuweisung).toBe('bestaetigt_topf');
+                    expect(zs.finalerTopfStatus).toBe('bestaetigt_topf');
                 }
             });
             expect(a2_updated.Status).toBe('vollstaendig_bestaetigt_topf');
@@ -484,6 +486,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             a3_updated.ZugewieseneSlots.forEach(zs => {
                 if (zs.slot.VerweisAufTopf.equals(kt_AutoResolve._id)) {
                     expect(zs.statusEinzelzuweisung).toBe('abgelehnt_topf_verzichtet');
+                    expect(zs.finalerTopfStatus).toBe('abgelehnt_topf_verzichtet');
                 }
             });
             // Der Gesamtstatus von A3 hängt davon ab, ob es noch andere, nicht betroffene Slot-Zuweisungen hat.
@@ -1926,15 +1929,19 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
 
             expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
+            expect(a1_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('abgelehnt_slot_verzichtet');          
             expect(a1_updated.Status).toBe('final_abgelehnt'); 
 
             expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');          
+            expect(a2_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('bestaetigt_slot');          
             expect(a2_updated.Status).toBe('vollstaendig_final_bestaetigt'); 
 
             expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
+            expect(a3_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('abgelehnt_slot_verzichtet');          
             expect(a3_updated.Status).toBe('final_abgelehnt'); 
 
             expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
+            expect(a4_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('abgelehnt_slot_verzichtet');          
             expect(a4_updated.Status).toBe('final_abgelehnt'); 
 
     });
@@ -1990,18 +1997,22 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
         // Anfrage 1,3,4 waren 'abgelehnt_slot_verzichtet', Anfrage 2 war 'bestaetigt_slot'
         // -> Alle sollten jetzt wieder 'bestaetigt_topf' sein, was ihr finaler Topf-Status war.
         expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');          
+        expect(a1_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('entscheidung_ausstehend');          
         expect(a1_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;          
         expect(a1_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
 
         expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+        expect(a2_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('entscheidung_ausstehend');
         expect(a2_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;           
         expect(a2_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
 
         expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+        expect(a3_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('entscheidung_ausstehend');
         expect(a3_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;           
         expect(a3_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
 
         expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+        expect(a4_updated.ZugewieseneSlots[0].finalerSlotStatus).toBe('entscheidung_ausstehend');
         expect(a4_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;           
         expect(a4_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
     });
