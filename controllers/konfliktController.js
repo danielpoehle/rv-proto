@@ -2884,11 +2884,16 @@ exports.resetKonfliktGruppe = async (req, res) => {
         const gruppe = await KonfliktGruppe.findById(gruppenId)
             .populate({
                 path: 'konflikteInGruppe',
-                select: 'ausloesenderKapazitaetstopf'
+                select: 'ausloesenderKapazitaetstopf konfliktTyp'
             });
 
         if (!gruppe) {
             return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        }
+        if (!gruppe.konflikteInGruppe || gruppe.konflikteInGruppe.length === 0 || gruppe.konflikteInGruppe[0].konfliktTyp !== 'KAPAZITAETSTOPF') {
+            return res.status(400).json({ 
+                message: `Reset nicht möglich. Diese Funktion ist nur für Topf-Konfliktgruppen.`
+            });
         }
 
         const anfrageIdsToReset = gruppe.beteiligteAnfragen.map(id => id.toString());
@@ -2909,6 +2914,8 @@ exports.resetKonfliktGruppe = async (req, res) => {
                         zuweisung.statusEinzelzuweisung = 'initial_in_konfliktpruefung_topf';
                         anfrageModifiziert = true;
                     }
+                    // Entferne den Verweis auf das (bald gelöschte) Topf-Konfliktdokument
+                    zuweisung.topfKonfliktDoku = null;
                 }
             }
             if (anfrageModifiziert) {
@@ -2930,7 +2937,7 @@ exports.resetKonfliktGruppe = async (req, res) => {
         console.log(`Konfliktgruppe ${gruppenId} wurde gelöscht.`);
         
         res.status(200).json({
-            message: `Konfliktgruppe erfolgreich zurückgesetzt.`,
+            message: `Topf-Konfliktgruppe erfolgreich zurückgesetzt.`,
             summary: {
                 anfragenZurueckgesetzt: anfragen.length,
                 konfliktDokusGeloescht: konfliktDokuIdsToDelete.length,
@@ -2939,7 +2946,90 @@ exports.resetKonfliktGruppe = async (req, res) => {
         });
 
     } catch (error) {
-        console.error(`Fehler beim Zurücksetzen der Konfliktgruppe ${gruppenId}:`, error);
+        console.error(`Fehler beim Zurücksetzen der Topf-Konfliktgruppe ${gruppenId}:`, error);
+        res.status(500).json({ message: 'Serverfehler beim Zurücksetzen der Gruppe.' });
+    }
+};
+
+// @desc    Setzt eine komplette SLOT-Konfliktgruppe zurück und aktualisiert den Status der Slots der Anfragen
+// @route   POST /api/konflikte/slot-gruppen/:gruppenId/reset
+exports.resetSlotKonfliktGruppe = async (req, res) => {
+    const { gruppenId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(gruppenId)) {
+        return res.status(400).json({ message: 'Ungültiges Format für Gruppen-ID.' });
+    }
+
+    try {
+        // 1a. Finde die Gruppe und lade den Typ ihrer Mitglieder via populate
+        const gruppe = await KonfliktGruppe.findById(gruppenId)
+            .populate({
+                path: 'konflikteInGruppe',
+                select: 'konfliktTyp' // Lade nur das 'konfliktTyp'-Feld der Mitglieder
+            });
+
+        if (!gruppe) {
+            return res.status(404).json({ message: 'Konfliktgruppe nicht gefunden.' });
+        }
+
+        // 1b. Prüfe den Typ des ERSTEN Mitglieds der Gruppe. Annahme: Alle Mitglieder haben denselben Typ.
+        if (!gruppe.konflikteInGruppe || gruppe.konflikteInGruppe.length === 0 || gruppe.konflikteInGruppe[0].konfliktTyp !== 'SLOT') {
+            return res.status(400).json({ 
+                message: `Reset nicht möglich. Diese Funktion ist nur für Slot-Konfliktgruppen.`
+            });
+        }
+
+        const anfrageIdsToReset = gruppe.beteiligteAnfragen.map(id => id.toString());
+        const konfliktDokuIdsToDelete = gruppe.konflikteInGruppe.map(k => k._id);
+
+        // 2. Setze den Status der betroffenen Slot-Zuweisungen in den Anfragen zurück
+        const anfragen = await Anfrage.find({ _id: { $in: anfrageIdsToReset } });
+
+        for (const anfrage of anfragen) {
+            let anfrageModifiziert = false;
+            for (const zuweisung of anfrage.ZugewieseneSlots) {
+                // Prüfe, ob diese Zuweisung von einem der zu löschenden Slot-Konfliktdokumente betroffen ist
+                if (zuweisung.slotKonfliktDoku && konfliktDokuIdsToDelete.some(kId => kId.equals(zuweisung.slotKonfliktDoku))) {
+                    
+                    // --- HIER IST DIE NEUE KERNLOGIK ---
+                    // Setze den Einzelstatus auf den gespeicherten finalen Topf-Status zurück
+                    if (zuweisung.statusEinzelzuweisung !== zuweisung.finalerTopfStatus) {
+                        zuweisung.statusEinzelzuweisung = zuweisung.finalerTopfStatus;
+                        anfrageModifiziert = true;
+                    }
+                    // Entferne den Verweis auf das (bald gelöschte) Slot-Konfliktdokument
+                    zuweisung.slotKonfliktDoku = null;
+                }
+            }
+            if (anfrageModifiziert) {
+                anfrage.markModified('ZugewieseneSlots');
+                await anfrage.updateGesamtStatus(); // Gesamtstatus neu berechnen
+                await anfrage.save();
+            }
+        }
+        console.log(`${anfragen.length} Anfragen wurden auf ihren finalen Topf-Status zurückgesetzt.`);
+
+        // 3. Lösche alle zugehörigen Slot-Konfliktdokumentationen
+        if (konfliktDokuIdsToDelete.length > 0) {
+            const { deletedCount } = await KonfliktDokumentation.deleteMany({ _id: { $in: konfliktDokuIdsToDelete } });
+            console.log(`${deletedCount} Slot-Konfliktdokumentationen wurden gelöscht.`);
+        }
+
+        // 4. Lösche die Slot-Konfliktgruppe selbst
+        await KonfliktGruppe.findByIdAndDelete(gruppenId);
+        console.log(`Slot-Konfliktgruppe ${gruppenId} wurde gelöscht.`);
+        
+        res.status(200).json({
+            message: `Slot-Konfliktgruppe erfolgreich zurückgesetzt.`,
+            summary: {
+                anfragenZurueckgesetzt: anfragen.length,
+                konfliktDokusGeloescht: konfliktDokuIdsToDelete.length,
+                gruppeGeloeschtId: gruppenId
+            }
+        });
+
+    } catch (error) {
+        console.error(`Fehler beim Zurücksetzen der Slot-Konfliktgruppe ${gruppenId}:`, error);
         res.status(500).json({ message: 'Serverfehler beim Zurücksetzen der Gruppe.' });
     }
 };

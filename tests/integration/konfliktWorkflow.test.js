@@ -557,7 +557,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
         // ---- ÜBERPRÜFUNG ----
         // 1. Überprüfung der Reset-Antwort
         expect(resetResponse.status).toBe(200);
-        expect(resetResponse.body.message).toBe('Konfliktgruppe erfolgreich zurückgesetzt.');
+        expect(resetResponse.body.message).toBe('Topf-Konfliktgruppe erfolgreich zurückgesetzt.');
         expect(resetResponse.body.summary.anfragenZurueckgesetzt).toBe(3);
         expect(resetResponse.body.summary.konfliktDokusGeloescht).toBe(1);
 
@@ -585,12 +585,18 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
         // -> Alle sollten jetzt wieder 'initial_in_konfliktpruefung_topf' sein.
         for(const zuweisung of anfrage1_final.ZugewieseneSlots) {
             expect(zuweisung.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+            expect(zuweisung.slotKonfliktDoku).toBeNull; 
+            expect(zuweisung.topfKonfliktDoku).toBeNull; 
         }
         for(const zuweisung of anfrage2_final.ZugewieseneSlots) {
             expect(zuweisung.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+            expect(zuweisung.slotKonfliktDoku).toBeNull; 
+            expect(zuweisung.topfKonfliktDoku).toBeNull;
         }
         for(const zuweisung of anfrage3_final.ZugewieseneSlots) {
             expect(zuweisung.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+            expect(zuweisung.slotKonfliktDoku).toBeNull; 
+            expect(zuweisung.topfKonfliktDoku).toBeNull;
         }
     });
 
@@ -1931,6 +1937,73 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
             expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_slot_verzichtet');          
             expect(a4_updated.Status).toBe('final_abgelehnt'); 
 
+    });
+
+    it('sollte eine komplette Slot-Konfliktgruppe zurücksetzen, Konfliktdokus löschen und Anfragen-Status revertieren', async () => {
+        // Aktion: 3 Anfragen (anfrage1,3,4) verzichtet. Anfrage 2 gewinnt.
+        const updatePayload = {
+            ListeAnfragenMitVerzicht: [anfragenIds[0].toString(), anfragenIds[2].toString(), anfragenIds[3].toString()],
+        };
+
+        const response = await request(app)
+            .put(`/api/konflikte/slot/${konfliktDokuDB._id}/verzicht-verschub`) // Neuer Endpunkt für Slot-Konflikte
+            .send(updatePayload);
+
+        expect(response.status).toBe(200);
+            
+        const aktualisierteKonfliktDoku = await KonfliktDokumentation.findById(response.body.data._id);
+
+        // Überprüfung des Konfliktdokuments
+        expect(aktualisierteKonfliktDoku.status).toBe('geloest');
+
+        const konfliktGruppe = await KonfliktGruppe.findOne({ "beteiligteAnfragen": anfragenIds[0].toString() });
+
+        // ---- AKTION: Rufe den Reset-Endpunkt für die Gruppe auf ----
+        const resetResponse = await request(app)
+            .post(`/api/konflikte/slot-gruppen/${konfliktGruppe._id}/reset`)
+            .send();
+
+        // ---- ÜBERPRÜFUNG ----
+        // 1. Überprüfung der Reset-Antwort
+        expect(resetResponse.status).toBe(200);
+        expect(resetResponse.body.message).toBe('Slot-Konfliktgruppe erfolgreich zurückgesetzt.');
+        expect(resetResponse.body.summary.anfragenZurueckgesetzt).toBe(4);
+        expect(resetResponse.body.summary.konfliktDokusGeloescht).toBe(1);
+
+        // 2. Überprüfung der Datenbank: Konflikt-Objekte sollten gelöscht sein
+        const geloeschteGruppe = await KonfliktGruppe.findById(konfliktGruppe._id);
+        expect(geloeschteGruppe).toBeNull();
+        
+        const anzahlKonfliktDokus = await KonfliktDokumentation.countDocuments({ 
+            _id: { $in: konfliktGruppe.konflikteInGruppe } 
+        });
+        expect(anzahlKonfliktDokus).toBe(0);
+
+        // 3. Überprüfung der Anfragen: Status sollten zurückgesetzt sein
+        const a1_updated = await Anfrage.findById(anfragenIds[0]).populate('ZugewieseneSlots.slot');
+        const a2_updated = await Anfrage.findById(anfragenIds[1]).populate('ZugewieseneSlots.slot');
+        const a3_updated = await Anfrage.findById(anfragenIds[2]).populate('ZugewieseneSlots.slot');
+        const a4_updated = await Anfrage.findById(anfragenIds[3]).populate('ZugewieseneSlots.slot');
+        
+
+        // Prüfe den granularen Status der Slot-Zuweisung und des Gesamt-Status
+        // Anfrage 1,3,4 waren 'abgelehnt_slot_verzichtet', Anfrage 2 war 'bestaetigt_slot'
+        // -> Alle sollten jetzt wieder 'bestaetigt_topf' sein, was ihr finaler Topf-Status war.
+        expect(a1_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');          
+        expect(a1_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;          
+        expect(a1_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
+
+        expect(a2_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+        expect(a2_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;           
+        expect(a2_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
+
+        expect(a3_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+        expect(a3_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;           
+        expect(a3_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
+
+        expect(a4_updated.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+        expect(a4_updated.ZugewieseneSlots[0].slotKonfliktDoku).toBeNull;           
+        expect(a4_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
     });
 
     it('sollte Slot-Konflikt durch Entgeltvergleich lösen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen (granularer Status)', async () => {
