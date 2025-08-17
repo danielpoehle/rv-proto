@@ -2,7 +2,7 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../../server');
-const Slot = require('../../models/Slot');
+const {Slot} = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 const Anfrage = require('../../models/Anfrage');
 const KonfliktDokumentation = require('../../models/KonfliktDokumentation');
@@ -61,7 +61,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
                     for (const zeit of zeiten) {
                         // Erstelle 2 Slots pro "Muster", um maxKap=1 zu erhalten
                         const [von, bis] = abschnitt.split('-');
-                        const slotData = { von, bis, Abschnitt: abschnitt, Kalenderwoche: kw, Verkehrstag: vt, Verkehrsart: commonParams.verkehrsart, Grundentgelt: commonParams.grundentgelt, Abfahrt: zeit.abf, Ankunft: zeit.ank };
+                        const slotData = { slotTyp: 'TAG', von, bis, Abschnitt: abschnitt, Kalenderwoche: kw, Verkehrstag: vt, Verkehrsart: commonParams.verkehrsart, Grundentgelt: commonParams.grundentgelt, Abfahrt: zeit.abf, Ankunft: zeit.ank };
                         await request(app).post('/api/slots').send({ ...slotData, });
                         //await new Slot(slotData).save(); // Speichere direkt für schnelleres Setup
                         //await new Slot({ ...slotData, SlotID_Sprechend: undefined }).save(); // Zweiter Slot mit gleichem Muster
@@ -73,7 +73,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         //zusätzlich einen Slot SPNV, der von keiner Anfrage genutzt werden kann, erzeugen. Dieser Slot darf später nicht in den verfügbaren Alternativen auftauchen.
         const abschnitt = "A-X";
         const [von, bis] = abschnitt.split('-');
-        const slotData = { von, bis, Abschnitt: abschnitt, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", Grundentgelt: commonParams.grundentgelt, Abfahrt: { stunde: 9, minute: 25 }, Ankunft: { stunde: 10, minute: 55 } };
+        const slotData = { slotTyp: 'TAG', von, bis, Abschnitt: abschnitt, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", Grundentgelt: commonParams.grundentgelt, Abfahrt: { stunde: 9, minute: 25 }, Ankunft: { stunde: 10, minute: 55 } };
         await request(app).post('/api/slots').send({ ...slotData, });
         
         console.log("TEST SETUP: Slots erstellt.");

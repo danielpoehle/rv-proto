@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const Anfrage = require('../models/Anfrage');
-const Slot = require('../models/Slot');
+const {Slot, TagesSlot, NachtSlot} = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 const KonfliktDokumentation = require('../models/KonfliktDokumentation');
 const { parseISO, getDay, eachDayOfInterval, startOfWeek } = require('date-fns');
@@ -11,6 +11,30 @@ const { UTCDate } = require('@date-fns/utc');
 // --- HILFSFUNKTIONEN (aus anfrageController.js hierher verschoben) ---
 const GLOBAL_KW1_START_DATE_ISO = "2024-12-30T00:00:00.000Z";
 const GLOBAL_KW1_START_DATE = startOfWeek(parseISO(GLOBAL_KW1_START_DATE_ISO), { weekStartsOn: 1 });
+
+function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
+    if (stunde === undefined || stunde === null || stunde < 0 || stunde > 23) return null;
+
+    if (stunde >= 5 && stunde <= 6) return '05-07';
+    if (stunde >= 7 && stunde <= 8) return '07-09';
+    if (stunde >= 9 && stunde <= 10) return '09-11';
+    if (stunde >= 11 && stunde <= 12) return '11-13';
+    if (stunde >= 13 && stunde <= 14) return '13-15';
+    if (stunde >= 15 && stunde <= 16) return '15-17';
+    if (stunde >= 17 && stunde <= 18) return '17-19';
+    if (stunde >= 19 && stunde <= 20) return '19-21';
+    if (stunde >= 21 && stunde <= 22) return '21-23';
+    if (stunde === 23 || stunde === 0) return '23-01'; // Stunde 0 (Mitternacht) für das 23-01 Fenster
+    if (stunde >= 1 && stunde <= 2) return '01-03';
+    if (stunde >= 3 && stunde <= 4) return '03-05';
+    return null; // Sollte nicht erreicht werden bei validen Stunden 0-23
+}
+
+function berechneFahrzeit(gewuenschterAbschnitt){
+    let fz = (60 * gewuenschterAbschnitt.Ankunftszeit.stunde + gewuenschterAbschnitt.Ankunftszeit.minute) - (60 * gewuenschterAbschnitt.Abfahrtszeit.stunde + gewuenschterAbschnitt.Abfahrtszeit.minute);
+    if(fz < 0){fz = fz + 24*60;}
+    return fz;
+}
 
 /**
  * Berechnet die Gesamtzahl der Betriebstage einer Anfrage basierend auf ihrem Zeitraum und Verkehrstag.
@@ -84,23 +108,43 @@ async function calculateAnfrageEntgelt(anfrage, zugewieseneSlotsPopulated) {
 
     let summeGrundentgelteProDurchlauf = 0;
 
+    //console.log(anfrage);
+    //console.log(`zugewieseneSlotsPopulated ${zugewieseneSlotsPopulated}`);
+
     // Schritt 2: Ermittle die Summe der Grundentgelte für EINEN kompletten Durchlauf der Anfrage.
     // Ein Durchlauf besteht aus allen Segmenten in anfrage.ListeGewuenschterSlotAbschnitte.
     for (const gewuenschterAbschnitt of anfrage.ListeGewuenschterSlotAbschnitte) {
         // Finde ein repräsentatives zugewiesenes Slot-Muster (aus einer beliebigen KW,
         // da wir annehmen, das Grundentgelt für diesen Slot-Typ ist über KWs hinweg gleich),
         // das den Eigenschaften des gewünschten Abschnitts entspricht.
-        const passendesSlotDetail = zugewieseneSlotsPopulated.find(s =>
-            s.von === gewuenschterAbschnitt.von &&
-            s.bis === gewuenschterAbschnitt.bis &&
-            s.Verkehrsart === anfrage.Verkehrsart && // Verkehrsart der Anfrage muss zum Slot passen
-            s.Abfahrt.stunde === gewuenschterAbschnitt.Abfahrtszeit.stunde &&
-            s.Abfahrt.minute === gewuenschterAbschnitt.Abfahrtszeit.minute &&
-            s.Ankunft.stunde === gewuenschterAbschnitt.Ankunftszeit.stunde && // KORREKTUR: Ankunftszeit in den Match einbeziehen
-            s.Ankunft.minute === gewuenschterAbschnitt.Ankunftszeit.minute
-            // Der Abschnitt des Slots (Slot.Abschnitt) sollte hier auch matchen, wenn er für die Preisbildung relevant ist.
-            // Wenn das Slot-Muster einzigartig durch von, bis, Zeiten, VA definiert ist, reicht das.
+        const passendesSlotDetail = zugewieseneSlotsPopulated.find(s => {
+
+            //console.log(gewuenschterAbschnitt);
+            //console.log(s);
+
+            if(s.slotTyp === 'TAG'){
+                const vonMatch = s.von === gewuenschterAbschnitt.von;
+                const bisMatch = s.bis === gewuenschterAbschnitt.bis;
+                const vaMatch = s.Verkehrsart === anfrage.Verkehrsart; 
+                const abfHMatch = s.Abfahrt.stunde === gewuenschterAbschnitt.Abfahrtszeit.stunde;
+                const abfMMatch = s.Abfahrt.minute === gewuenschterAbschnitt.Abfahrtszeit.minute;
+                const ankHMatch = s.Ankunft.stunde === gewuenschterAbschnitt.Ankunftszeit.stunde;
+                const ankMMatch = s.Ankunft.minute === gewuenschterAbschnitt.Ankunftszeit.minute;
+                //console.log(`vonMatch ${vonMatch} bisMatch ${bisMatch} vaMatch ${vaMatch} abfHMatch ${abfHMatch} abfMMatch ${abfMMatch} ankHMatch ${ankHMatch} ankMMatch ${ankMMatch}`)
+                return vonMatch && bisMatch && vaMatch && abfHMatch && abfMMatch && ankHMatch && ankMMatch;
+            }else{
+                const vonMatch = s.von === gewuenschterAbschnitt.von;
+                const bisMatch = s.bis === gewuenschterAbschnitt.bis;
+                const vaMatch = s.Verkehrsart === 'ALLE';
+                const zfMatch = s.Zeitfenster === mapAbfahrtstundeToKapazitaetstopfZeitfenster(gewuenschterAbschnitt.Abfahrtszeit.stunde);
+                return vonMatch && bisMatch && vaMatch && zfMatch;
+            }           
+        }
         );
+        
+        //console.log(zugewieseneSlotsPopulated);
+        //console.log(gewuenschterAbschnitt);
+        //console.log(passendesSlotDetail);
 
         if (passendesSlotDetail && typeof passendesSlotDetail.Grundentgelt === 'number') {
             summeGrundentgelteProDurchlauf += passendesSlotDetail.Grundentgelt;
@@ -154,6 +198,8 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
 
     let zuzuweisendeSlotIdsSet = new Set(); // Sammelt String-IDs zur Vermeidung von Duplikaten
     let alleAbschnitteAbgedeckt = true;
+    // Definiere die Nachtstunden für die Prüfung
+    const nachtStunden = new Set([23, 0, 1, 2, 3, 4]);
 
     for (const gewuenschterAbschnitt of ListeGewuenschterSlotAbschnitte) {
         let patternFuerDiesenAbschnittMindestensEinmalGefunden = false;
@@ -166,7 +212,20 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
             }
             for (const slotVerkehrstag of zielSlotVerkehrstageFuerSlotSuche) {
                 //console.log(`${gewuenschterAbschnitt}, ${anfrageVerkehrsart}, KW ${globRelKW}, VT ${slotVerkehrstag}`);
-                const matchingSlots = await Slot.find({
+                const istNachtSuche = nachtStunden.has(gewuenschterAbschnitt.Abfahrtszeit.stunde);
+                let matchingSlots = [];
+
+                if(istNachtSuche){
+                    matchingSlots = await NachtSlot.find({
+                    von: gewuenschterAbschnitt.von,
+                    bis: gewuenschterAbschnitt.bis,
+                    Zeitfenster: mapAbfahrtstundeToKapazitaetstopfZeitfenster(gewuenschterAbschnitt.Abfahrtszeit.stunde),
+                    Verkehrsart: 'ALLE',
+                    Kalenderwoche: globRelKW,
+                    Verkehrstag: slotVerkehrstag
+                }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs holen für die erste Sammlung
+                }else {
+                    matchingSlots = await TagesSlot.find({
                     von: gewuenschterAbschnitt.von,
                     bis: gewuenschterAbschnitt.bis,
                     'Abfahrt.stunde': gewuenschterAbschnitt.Abfahrtszeit.stunde,
@@ -177,11 +236,34 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                     Kalenderwoche: globRelKW,
                     Verkehrstag: slotVerkehrstag
                 }).select('_id'); // Nur die IDs holen für die erste Sammlung
+                }
 
                 if (matchingSlots.length > 0) {
-                    patternFuerDiesenAbschnittMindestensEinmalGefunden = true;
-                    matchingSlots.forEach(slot => zuzuweisendeSlotIdsSet.add(slot._id.toString()));
-                }
+                    if (istNachtSuche) {
+                        // Bei Nacht-Slots: Finde den ERSTEN passenden Slot, dessen Fahrzeit-Range stimmt.
+                        const wunschfahrzeit = berechneFahrzeit(gewuenschterAbschnitt); 
+
+                        const ersterPassenderNachtSlot = matchingSlots.find(slot =>
+                            wunschfahrzeit >= slot.Mindestfahrzeit && wunschfahrzeit <= slot.Maximalfahrzeit
+                        );
+
+                        if (ersterPassenderNachtSlot) {
+                            // Es wurde ein passender Nacht-Slot gefunden
+                            patternFuerDiesenAbschnittMindestensEinmalGefunden = true;
+                            zuzuweisendeSlotIdsSet.add(ersterPassenderNachtSlot._id.toString());
+                        } else {
+                            // Es wurden zwar Nacht-Slots für das Zeitfenster gefunden,
+                            // aber bei keinem passte die Fahrzeit.
+                            anfrage.Validierungsfehler.push(`Für den Abschnitt ${gewuenschterAbschnitt.von} -> ${gewuenschterAbschnitt.bis} liegt die gewünschte Fahrzeit (Nacht) nicht im zulässigen Bereich der verfügbaren Slots.`);
+                            // In diesem Fall wird `patternFuerDiesenAbschnittMindestensEinmalGefunden` nicht `true` gesetzt,
+                            // was dazu führt, dass die Anfrage später als 'zuordnung_fehlgeschlagen' markiert wird.
+                        }
+                    } else {
+                        // Bei Tages-Slots: Nimm einfach den ERSTEN gefundenen Slot.
+                        patternFuerDiesenAbschnittMindestensEinmalGefunden = true;
+                        zuzuweisendeSlotIdsSet.add(matchingSlots[0]._id.toString());
+                    }
+                }                
             }
         }
         if (!patternFuerDiesenAbschnittMindestensEinmalGefunden) {
@@ -213,10 +295,14 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
     if (anfrage.ZugewieseneSlots.length > 0) {
         // Für die Entgeltberechnung benötigen wir die Details der zugewiesenen Slots.
         // Die finaleSlotObjectIdsFuerAnfrage enthalten die _id's der relevanten Slot-Muster.
-        const populatedZugewieseneSlots = await Slot.find({ 
+        const slotDocs = await Slot.find({ 
             '_id': { $in: finaleSlotObjectIdsFuerAnfrage } 
-        }).select('Grundentgelt von bis Abschnitt Verkehrsart Abfahrt Ankunft Kalenderwoche Verkehrstag'); // Alle relevanten Felder für calculateAnfrageEntgelt und dessen Helfer
+        }).select('Grundentgelt von bis Abschnitt Verkehrsart Abfahrt Ankunft Kalenderwoche Verkehrstag Zeitfenster slotTyp'); // Alle relevanten Felder für calculateAnfrageEntgelt und dessen Helfer
 
+        // Konvertiere die Mongoose-Dokumente in einfache JavaScript-Objekte.
+        // Dadurch wird sichergestellt, dass alle Eigenschaften direkt verfügbar sind.
+        const populatedZugewieseneSlots = slotDocs.map(doc => doc.toObject());
+        
         // Das 'anfrage'-Objekt, das wir an calculateAnfrageEntgelt übergeben,
         // hat jetzt bereits die neue Struktur von ZugewieseneSlots (Array von Objekten),
         // aber calculateAnfrageEntgelt erwartet die *populierten* Slot-Details als zweiten Parameter.

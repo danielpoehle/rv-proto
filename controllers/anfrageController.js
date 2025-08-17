@@ -1,7 +1,6 @@
 // slot-buchungs-app/controllers/anfrageController.js
 const mongoose = require('mongoose');
 const Anfrage = require('../models/Anfrage');
-const Slot = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 // Wichtig: date-fns installieren -> npm install date-fns
 const KonfliktDokumentation = require('../models/KonfliktDokumentation'); // Benötigt für Konflikt-Prüfung
@@ -38,9 +37,9 @@ function validateAnfrageLogic(data) {
 
     // Pufferzeit basierend auf Verkehrsart
     let aktuellePufferzeitMinuten = 0;
-    if (Verkehrsart === 'SPFV' || Verkehrsart === 'SGV') {
+    if (Verkehrsart === 'SPFV' ) {
         aktuellePufferzeitMinuten = 2;
-    } else if (Verkehrsart === 'SPNV') {
+    } else if (Verkehrsart === 'SPNV' || Verkehrsart === 'SGV') {
         aktuellePufferzeitMinuten = 0;
     } else {
         validierungsfehler.push(`Pufferzeit-Ermittlung: Unbekannte oder ungültige Verkehrsart '${Verkehrsart}'.`);
@@ -101,6 +100,8 @@ exports.createAnfrage = async (req, res) => {
             Zugnummer, EVU, ListeGewuenschterSlotAbschnitte, Verkehrsart,
             Verkehrstag, Zeitraum, Email
         } = req.body;
+
+        //console.log(req.body);
 
         // Einfache Eingabevalidierung (Pflichtfelder)
         if (!Zugnummer || !EVU || !ListeGewuenschterSlotAbschnitte || ListeGewuenschterSlotAbschnitte.length === 0 ||

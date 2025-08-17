@@ -36,6 +36,18 @@ router.get('/counter', slotController.getSlotCounterSummary);
 // @desc    Ruft alle Slots ab, die zu einer gemeinsamen Linie mit einer bestimmmten Abfahrtzeit auf einem Abschnitt gehören
 router.get('/by-muster', slotController.getSlotsByMuster);
 
+// ROUTE für die Datenmigration auf Tages-Slots
+// @route   POST /api/slots/migrate-to-discriminator
+// @desc    Aktualisiert alte Slot-Dokumente auf das neue Schema mit Discriminator-Key
+// @access  Admin (angenommen)
+router.post('/migrate-to-discriminator', slotController.migrateAlteSlots);
+
+// ROUTE für die spezielle Abfrage
+// @route   GET /api/slots/konflikt-alternativen
+// @desc    Sucht freie Slots für die Konfliktlösung basierend auf spezifischen Kriterien
+// @access  Admin/System (angenommen)
+router.get('/konflikt-alternativen', slotController.getKonfliktAlternativenSlots);
+
 // @route   GET /api/slots
 // @desc    Ruft alle Slots ab (mit Filter- und Sortiermöglichkeiten)
 // @access  Public/Admin
@@ -45,12 +57,6 @@ router.get('/', slotController.getAllSlots);
 // @desc    Ruft einen einzelnen Slot anhand seiner ID (_id oder SlotID_Sprechend) ab
 // @access  Public/Admin
 router.get('/:slotId', slotController.getSlotById);
-
-// NEUE ROUTE für die spezielle Abfrage
-// @route   GET /api/slots/konflikt-alternativen
-// @desc    Sucht freie Slots für die Konfliktlösung basierend auf spezifischen Kriterien
-// @access  Admin/System (angenommen)
-router.get('/konflikt-alternativen', slotController.getKonfliktAlternativenSlots);
 
 // @route   PUT /api/slots/:slotId
 // @desc    Aktualisiert einen bestehenden Slot

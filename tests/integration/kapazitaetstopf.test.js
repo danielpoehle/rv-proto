@@ -2,7 +2,7 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../../server');
-const Slot = require('../../models/Slot');
+const {Slot} = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 
 describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
@@ -36,17 +36,18 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
     it('sollte Kapazitätstöpfe beim Erstellen korrekt mit ihren Vorgängern und Nachfolgern verknüpfen (inkl. KW-Wechsel)', async () => {
         // ---- SETUP: Gemeinsame Parameter für die Slots und Töpfe ----
         const commonParams = {
-            von: "A", bis: "B", Abschnitt: "Test-Kette",
-            Verkehrsart: "SPFV", Verkehrstag: "Sa+So", Grundentgelt: 100
+            von: "A", bis: "B", Abschnitt: "Test-Kette", Verkehrstag: "Sa+So", Grundentgelt: 100
         };
 
         // ---- AKTION 1: Erstelle den ersten Topf (KT_A) über Slot 1 ----
         // Dieser Topf ist das letzte Zeitfenster in KW 2.
         const slot1Data = {
             ...commonParams,
+            slotTyp: 'NACHT',
             Kalenderwoche: 2,
-            Abfahrt: { stunde: 23, minute: 45 }, // Ergibt Zeitfenster '23-01'
-            Ankunft: { stunde: 0, minute: 30 }   // Nächster Tag
+            Zeitfenster: '23-01',
+            Mindestfahrzeit: 60,
+            Maximalfahrzeit: 75,
         };
         const response1 = await request(app).post('/api/slots').send(slot1Data);
         expect(response1.status).toBe(201);
@@ -65,9 +66,11 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
         // Dieser Topf ist das erste Zeitfenster in KW 3. Er sollte KT_A als Vorgänger erkennen.
         const slot2Data = {
             ...commonParams,
+            slotTyp: 'NACHT',
             Kalenderwoche: 3,
-            Abfahrt: { stunde: 1, minute: 45 }, // Ergibt Zeitfenster '01-03'
-            Ankunft: { stunde: 2, minute: 30 }
+            Zeitfenster: '01-03',
+            Mindestfahrzeit: 60,
+            Maximalfahrzeit: 75,
         };
         const response2 = await request(app).post('/api/slots').send(slot2Data);
         expect(response2.status).toBe(201);
@@ -90,9 +93,11 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
         // Dieser Topf ist das zweite Zeitfenster in KW 3. Er sollte KT_B als Vorgänger erkennen.
         const slot3Data = {
             ...commonParams,
+            slotTyp: 'NACHT',
             Kalenderwoche: 3,
-            Abfahrt: { stunde: 3, minute: 45 }, // Ergibt Zeitfenster '03-05'
-            Ankunft: { stunde: 4, minute: 30 }
+            Zeitfenster: '03-05',
+            Mindestfahrzeit: 60,
+            Maximalfahrzeit: 75,
         };
         const response3 = await request(app).post('/api/slots').send(slot3Data);
         expect(response3.status).toBe(201);

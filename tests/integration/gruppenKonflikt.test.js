@@ -2,7 +2,7 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../../server'); // Pfad zu deiner server.js
-const Slot = require('../../models/Slot');
+const {Slot} = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 const Anfrage = require('../../models/Anfrage');
 const KonfliktDokumentation = require('../../models/KonfliktDokumentation');
@@ -57,12 +57,14 @@ describe('Gruppierte Topf-Konfliktlösung', () => {
         // für denselben Abschnitt. Das sind 6 Slot-Muster, die 6 Töpfe erzeugen.
         // Jeder Topf hat eine maxKapazitaet von 1 (erstellt durch 2 Slots pro Topf-Definition).
         const commonSlotParams1 = {
+            slotTyp: "TAG",
             von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke1",
             Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
             Grundentgelt: grundentgelt
         };
 
         const commonSlotParams2 = {
+            slotTyp: "TAG",
             von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abschnitt: "Gruppen-Strecke2",
             Verkehrsart: "SPFV", Abfahrt: { stunde: 10, minute: 0 }, Ankunft: { stunde: 11, minute: 0 },
             Grundentgelt: grundentgelt
@@ -521,6 +523,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichem Status ----
 
             const commonSlotParams1 = {
+                slotTyp: "TAG",
                 von: "S", bis: "T", Abschnitt: "Sued",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
                 Grundentgelt: 150, Verkehrstag: "Mo-Fr"
@@ -618,11 +621,13 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichem Kapazitäten in den Töpfen ----
 
             const commonSlotParams1 = {
+                slotTyp: "TAG",
                 von: "S", bis: "T", Abschnitt: "Sued",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
                 Grundentgelt: 150, Verkehrstag: "Mo-Fr"
             };
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -687,6 +692,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
             
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -946,6 +952,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
             
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "Nord-West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -1120,6 +1127,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
             
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "Nord-West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -1293,6 +1301,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
             
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "Nord-West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -1462,6 +1471,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
             
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "Nord-West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -1658,7 +1668,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             }
 
             // 6 Slots für Abschn1 pro Woche erstellen, um maxKapazitaet = floor(0.7*6) = 4 zu erhalten
-            const slotBasis = { von: "Y", bis: "Z", Abschnitt: "Abschn1", 
+            const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: "Abschn1", 
                                     Verkehrstag: "Sa+So", Verkehrsart: "SPFV",
                                     Grundentgelt: 150 
                                 };
@@ -2134,11 +2144,13 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichen Slots ----
 
             const commonSlotParams1 = {
+                slotTyp: "TAG",
                 von: "S", bis: "T", Abschnitt: "Sued",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
                 Grundentgelt: 150, Verkehrstag: "Mo-Fr"
             };
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"
@@ -2222,6 +2234,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
 
             
             const commonSlotParams2 = {
+                slotTyp: "TAG",
                 von: "X", bis: "S", Abschnitt: "West",
                 Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
                 Grundentgelt: 120, Verkehrstag: "Mo-Fr"

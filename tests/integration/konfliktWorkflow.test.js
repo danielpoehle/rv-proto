@@ -2,7 +2,7 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../../server'); // Dein Express App
-const Slot = require('../../models/Slot');
+const {Slot} = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 const Anfrage = require('../../models/Anfrage');
 const KonfliktDokumentation = require('../../models/KonfliktDokumentation');
@@ -53,7 +53,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
                 Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
             };
             // 3 Slots für KonfliktZone1 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis = { von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+            const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
                                 Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, 
                                 Verkehrsart: topfKriterien.Verkehrsart,
                                 Grundentgelt: 150 
@@ -63,7 +63,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
             
             // 2 Slots für KonfliktZone2 erstellen, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
-            const slotBasis2 = { von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
+            const slotBasis2 = { slotTyp: "TAG", von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
                                 Verkehrstag: topfKriterien2.Verkehrstag, Kalenderwoche: topfKriterien2.Kalenderwoche, 
                                 Verkehrsart: topfKriterien2.Verkehrsart,
                                 Grundentgelt: 250 
@@ -72,7 +72,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte', () => {
             await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 20 } });
 
             // 3 Slots für KonfliktZone3 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis3 = { von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+            const slotBasis3 = { slotTyp: "TAG", von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
                                 Verkehrstag: topfKriterien3.Verkehrstag, Kalenderwoche: topfKriterien3.Kalenderwoche, 
                                 Verkehrsart: topfKriterien3.Verkehrsart,
                                 Grundentgelt: 50 
@@ -382,7 +382,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
                 Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 // Ergibt ZF "07-09"
             };
             const slotBasis = { 
-                von: "X", bis: "Y", Abschnitt: topfKriterien.Abschnitt, 
+                slotTyp: "TAG", von: "X", bis: "Y", Abschnitt: topfKriterien.Abschnitt, 
                 Ankunft: { stunde: 9, minute: 0 }, 
                 Verkehrstag: topfKriterien.Verkehrstag, 
                 Kalenderwoche: topfKriterien.Kalenderwoche, 
@@ -501,7 +501,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
     it('sollte eine komplette Konfliktgruppe zurücksetzen, Konfliktdokus löschen und Anfragen-Status revertieren', async () => {
         // ---- SETUP: Erzeuge einen Konflikt mit 3 Anfragen für maxKapazität=2 ----
         const topfKriterien = { Abschnitt: "ResetZone", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
-        const slotBasis = { von: "R", bis: "S", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: 100 };
+        const slotBasis = { slotTyp: "TAG", von: "R", bis: "S", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: 100 };
         // Erstelle 3 Slots -> maxKap = 2
         const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 10 } });
         await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 20 } });
@@ -637,7 +637,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             }
             // 1. Kapazitätstopf mit maxKapazitaet = 1 erstellen
             const topfKriterien = { Abschnitt: "EntgeltVglZone", Kalenderwoche: 4, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
-            const slotBasis = { von: "E1", bis: "E2", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: slotGrundentgelt };
+            const slotBasis = { slotTyp: "TAG", von: "E1", bis: "E2", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: slotGrundentgelt };
             // Erstelle 2 Slots, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
             const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
             await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
@@ -682,7 +682,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // 1. Kapazitätstopf mit maxKapazitaet = 1
             const topfKriterien = { Abschnitt: "EntgeltZone2", Kalenderwoche: 4, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
-            const slotBasis = { von: "E11", bis: "E21", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: slotGrundentgelt };
+            const slotBasis = { slotTyp: "TAG", von: "E11", bis: "E21", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: slotGrundentgelt };
             const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
             await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
             kt_Entgelt = await Kapazitaetstopf.findById(s1Resp.body.data.VerweisAufTopf);
@@ -767,7 +767,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // 1. Kapazitätstopf mit maxKapazitaet = 2
             const topfKriterienTie = { Abschnitt: "TieZone", Kalenderwoche: 5, Verkehrstag: "Mo-Fr", Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 9 };
-            const slotBasisTie = { von: "T1", bis: "T2", Abschnitt: topfKriterienTie.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienTie.Verkehrstag, Kalenderwoche: topfKriterienTie.Kalenderwoche, Verkehrsart: topfKriterienTie.Verkehrsart, Grundentgelt: slotGrundentgelt };
+            const slotBasisTie = { slotTyp: "TAG", von: "T1", bis: "T2", Abschnitt: topfKriterienTie.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienTie.Verkehrstag, Kalenderwoche: topfKriterienTie.Kalenderwoche, Verkehrsart: topfKriterienTie.Verkehrsart, Grundentgelt: slotGrundentgelt };
             
             const sT1Resp = await request(app).post('/api/slots').send({ ...slotBasisTie, Abfahrt: { stunde: topfKriterienTie.AbfahrtStundeFuerZeitfenster, minute: 10 } });
             await request(app).post('/api/slots').send({ ...slotBasisTie, Abfahrt: { stunde: topfKriterienTie.AbfahrtStundeFuerZeitfenster, minute: 20 } });
@@ -849,7 +849,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // 1. Kapazitätstopf KT_HP mit maxKapazitaet = 2
             const topfKriterienHP = { Abschnitt: "HP_Zone1", Kalenderwoche: 7, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", AbfahrtStundeFuerZeitfenster: 9 };
-            const slotBasisHP = { von: "HP1", bis: "HP2", Abschnitt: topfKriterienHP.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienHP.Verkehrstag, Kalenderwoche: topfKriterienHP.Kalenderwoche, Verkehrsart: topfKriterienHP.Verkehrsart, Grundentgelt: slotGrundentgeltHP };
+            const slotBasisHP = {  slotTyp: "TAG", von: "HP1", bis: "HP2", Abschnitt: topfKriterienHP.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienHP.Verkehrstag, Kalenderwoche: topfKriterienHP.Kalenderwoche, Verkehrsart: topfKriterienHP.Verkehrsart, Grundentgelt: slotGrundentgeltHP };
             const sHP1Resp = await request(app).post('/api/slots').send({ ...slotBasisHP, Abfahrt: { stunde: topfKriterienHP.AbfahrtStundeFuerZeitfenster, minute: 10 } });
             // Erstelle 3 Slots, um maxKapazitaet = 2 zu erhalten
             await request(app).post('/api/slots').send({ ...slotBasisHP, Abfahrt: { stunde: topfKriterienHP.AbfahrtStundeFuerZeitfenster, minute: 20 } });
@@ -957,7 +957,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
         // 1. Kapazitätstopf mit maxKapazitaet = 2
         const topfKriterienHPTie = { Abschnitt: "HPTieZone", Kalenderwoche: 8, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 9 };
-        const slotBasisHPTie = { von: "TIE1", bis: "TIE2", Abschnitt: topfKriterienHPTie.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienHPTie.Verkehrstag, Kalenderwoche: topfKriterienHPTie.Kalenderwoche, Verkehrsart: topfKriterienHPTie.Verkehrsart, Grundentgelt: slotGrundentgeltHP };
+        const slotBasisHPTie = { slotTyp: "TAG", von: "TIE1", bis: "TIE2", Abschnitt: topfKriterienHPTie.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienHPTie.Verkehrstag, Kalenderwoche: topfKriterienHPTie.Kalenderwoche, Verkehrsart: topfKriterienHPTie.Verkehrsart, Grundentgelt: slotGrundentgeltHP };
         // 3 Slots erstellen, um maxKapazitaet = 2 zu erhalten
         const sHPT1Resp = await request(app).post('/api/slots').send({ ...slotBasisHPTie, Abfahrt: { stunde: topfKriterienHPTie.AbfahrtStundeFuerZeitfenster, minute: 10 } });
         await request(app).post('/api/slots').send({ ...slotBasisHPTie, Abfahrt: { stunde: topfKriterienHPTie.AbfahrtStundeFuerZeitfenster, minute: 20 } });
@@ -1069,7 +1069,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // 1. Kapazitätstopf KT_InvBid mit maxKapazitaet = 1
             const topfKriterienInv = { Abschnitt: "InvBidZone", Kalenderwoche: 9, Verkehrstag: "Sa+So", Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 };
-            const slotBasisInv = { von: "INV1", bis: "INV2", Abschnitt: topfKriterienInv.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, Verkehrstag: topfKriterienInv.Verkehrstag, Kalenderwoche: topfKriterienInv.Kalenderwoche, Verkehrsart: topfKriterienInv.Verkehrsart, Grundentgelt: slotGrundentgeltInv };
+            const slotBasisInv = { slotTyp: "TAG", von: "INV1", bis: "INV2", Abschnitt: topfKriterienInv.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, Verkehrstag: topfKriterienInv.Verkehrstag, Kalenderwoche: topfKriterienInv.Kalenderwoche, Verkehrsart: topfKriterienInv.Verkehrsart, Grundentgelt: slotGrundentgeltInv };
             // 2 Slots erstellen, um maxKap = floor(0.7*2) = 1 zu erhalten
             const sInv1Resp = await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 10 } });
             await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 20 } });
@@ -1167,7 +1167,7 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             // 1. Kapazitätstopf KT_InvBid mit maxKapazitaet = 1
             const topfKriterienInv = { Abschnitt: "InvBidZone", Kalenderwoche: 9, Verkehrstag: "Sa+So", Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 };
-            const slotBasisInv = { von: "INV1", bis: "INV2", Abschnitt: topfKriterienInv.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, Verkehrstag: topfKriterienInv.Verkehrstag, Kalenderwoche: topfKriterienInv.Kalenderwoche, Verkehrsart: topfKriterienInv.Verkehrsart, Grundentgelt: slotGrundentgeltInv };
+            const slotBasisInv = { slotTyp: "TAG", von: "INV1", bis: "INV2", Abschnitt: topfKriterienInv.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, Verkehrstag: topfKriterienInv.Verkehrstag, Kalenderwoche: topfKriterienInv.Kalenderwoche, Verkehrsart: topfKriterienInv.Verkehrsart, Grundentgelt: slotGrundentgeltInv };
             // 2 Slots erstellen, um maxKap = floor(0.7*2) = 1 zu erhalten
             const sInv1Resp = await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 10 } });
             await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 20 } });
@@ -1295,6 +1295,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         anfragenFuerBelegung = [];
 
         const commonParams = {
+            slotTyp: "TAG",
             von: "Analyse-A", bis: "Analyse-B", Abschnitt: "Analyse-Strecke",
             Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Kalenderwoche: 4, Grundentgelt: 10
         };
@@ -1497,7 +1498,7 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
                 Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
             };
             // 3 Slots für KonfliktZone1 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis = { von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+            const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
                                 Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, 
                                 Verkehrsart: topfKriterien.Verkehrsart,
                                 Grundentgelt: 150 
@@ -1507,7 +1508,7 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
             
             // 2 Slots für KonfliktZone2 erstellen, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
-            const slotBasis2 = { von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
+            const slotBasis2 = { slotTyp: "TAG", von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
                                 Verkehrstag: topfKriterien2.Verkehrstag, Kalenderwoche: topfKriterien2.Kalenderwoche, 
                                 Verkehrsart: topfKriterien2.Verkehrsart,
                                 Grundentgelt: 250 
@@ -1516,7 +1517,7 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 20 } });
 
             // 3 Slots für KonfliktZone3 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis3 = { von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
+            const slotBasis3 = { slotTyp: "TAG", von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
                                 Verkehrstag: topfKriterien3.Verkehrstag, Kalenderwoche: topfKriterien3.Kalenderwoche, 
                                 Verkehrsart: topfKriterien3.Verkehrsart,
                                 Grundentgelt: 50 
@@ -1830,7 +1831,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
         
 
         // 6 Slots für Abschn1 erstellen, um maxKapazitaet = floor(0.7*6) = 4 zu erhalten
-        const slotBasis = { von: "Y", bis: "Z", Abschnitt: "Abschn1", 
+        const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: "Abschn1", 
                                 Verkehrstag: "Sa+So", Kalenderwoche: 2, Verkehrsart: "SGV",
                                 Grundentgelt: 150 
                             };

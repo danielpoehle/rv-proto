@@ -3,7 +3,7 @@ const mongoose = require('mongoose'); // Für ObjectId.isValid
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 const KonfliktDokumentation = require('../models/KonfliktDokumentation');
 const Anfrage = require('../models/Anfrage'); // für Populate
-const Slot = require('../models/Slot'); // Benötigt, um Slot.VerweisAufTopf zu prüfen
+const {Slot} = require('../models/Slot'); // Benötigt, um Slot.VerweisAufTopf zu prüfen
 const KonfliktGruppe = require('../models/KonfliktGruppe');
 const konfliktService = require('../utils/konflikt.service');
 

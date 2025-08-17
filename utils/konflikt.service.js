@@ -57,7 +57,8 @@ async function aktualisiereKonfliktGruppen() {
         const relevanteKonflikte = await KonfliktDokumentation.find({})
             .select('beteiligteAnfragen status ausloesenderKapazitaetstopf ausloesenderSlot konfliktTyp')
             .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet ListeDerSlots') // Lade Infos des Topfs für gruppenschluessel
-            .populate('ausloesenderSlot', 'Linienbezeichnung von bis Abfahrt Verkehrsart'); // Lade Infos des Slots für gruppenschluessel
+            .populate('ausloesenderSlot', 'Linienbezeichnung von bis Abfahrt Verkehrsart')
+            .lean(); // Lade Infos des Slots für gruppenschluessel
 
 
 
@@ -76,6 +77,8 @@ async function aktualisiereKonfliktGruppen() {
                 gruppenSchluessel = `${maxKap}#${evuMarktanteilLimit}|${anfrageIdsStrings.join('#')}`;  
             }
             if(konflikt.konfliktTyp === 'SLOT'){
+                //console.log(konflikt.ausloesenderSlot);
+                //console.log(konflikt.ausloesenderSlot.Abfahrt);
                 const prefix = `${konflikt.ausloesenderSlot.Linienbezeichnung}#${konflikt.ausloesenderSlot.von}#${konflikt.ausloesenderSlot.bis}#${formatTimeForID(konflikt.ausloesenderSlot.Abfahrt.stunde, konflikt.ausloesenderSlot.Abfahrt.minute)}#${konflikt.ausloesenderSlot.Verkehrsart}`;
                 // Schlüssel: "Linie#von#bis#Abfahrt(HHMM)#Verkehrsart|anfrageId1#anfrageId2#..."
                 gruppenSchluessel = `${prefix}|${anfrageIdsStrings.join('#')}`;
@@ -89,7 +92,7 @@ async function aktualisiereKonfliktGruppen() {
                 });
             }
             // Speichere das ganze (lean) Objekt, damit wir den Status haben
-            gruppenMap.get(gruppenSchluessel).konflikteInGruppe.push(konflikt.toObject());
+            gruppenMap.get(gruppenSchluessel).konflikteInGruppe.push(konflikt);
         }
 
         // 3. Führe für jede gefundene Gruppe ein "Upsert" (Update or Insert) in der DB durch

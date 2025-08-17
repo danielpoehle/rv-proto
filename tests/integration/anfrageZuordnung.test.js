@@ -2,7 +2,7 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../../server');
-const Slot = require('../../models/Slot');
+const {Slot} = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 const Anfrage = require('../../models/Anfrage');
 const { UTCDate } = require('@date-fns/utc');
@@ -105,6 +105,7 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
     it('Szenario C (ursprünglich): Tägliche Anfrage (1 Abschnitt) über 2 KWs auf 4 Töpfe', async () => {
         // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
         const commonSlotParams = {
+            slotTyp: 'TAG',
             von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor",
             Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 9, minute: 0 },
             Verkehrsart: "SPFV", Grundentgelt: 150
@@ -244,15 +245,15 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
 
         const slotDefinitions = [];
         // Slots für Abschnitt 1 (Strecke_AB)
-        slotDefinitions.push({ von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
-        slotDefinitions.push({ von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 1, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
-        slotDefinitions.push({ von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
-        slotDefinitions.push({ von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 2, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 1, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "A", bis: "B", Abschnitt: abschnitt1, Kalenderwoche: 2, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
         // Slots für Abschnitt 2 (Strecke_BC)
-        slotDefinitions.push({ von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 }); // Gleiche Zeiten für Einfachheit, könnten auch andere sein
-        slotDefinitions.push({ von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 1, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
-        slotDefinitions.push({ von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
-        slotDefinitions.push({ von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 2, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 }); // Gleiche Zeiten für Einfachheit, könnten auch andere sein
+        slotDefinitions.push({ slotTyp: 'TAG', von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 1, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
+        slotDefinitions.push({ slotTyp: 'TAG', von: "B", bis: "C", Abschnitt: abschnitt2, Kalenderwoche: 2, Verkehrstag: "Sa+So", Verkehrsart: gemeinsameVerkehrsart, Abfahrt: { stunde: gemeinsameAbfahrtStunde, minute: 0 }, Ankunft: { stunde: gemeinsameAnkunftStunde, minute: 0 }, Grundentgelt: 150 });
 
         const erstellteSlots = [];
         let zugehoerigeTopfIds = new Set();
@@ -345,6 +346,7 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
     it('Szenario C (Massen-Operation): 3 Tägliche Anfragen (1 Abschnitt) über 2 KWs auf 4 Töpfe', async () => {
         // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
         const commonSlotParams = {
+            slotTyp: 'TAG',
             von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor",
             Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 9, minute: 0 },
             Verkehrsart: "SPFV", Grundentgelt: 150
@@ -545,6 +547,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
     it('E1: Sollte das Entgelt für eine einfache Anfrage mit einem Slot-Abschnitt korrekt berechnen', async () => {
         // 1. Vorbereitung: Slot erstellen
         const slotData_E1 = {
+            slotTyp: 'TAG',
             von: "StartE1", bis: "EndeE1", Abschnitt: "Einfach",
             Abfahrt: { stunde: 10, minute: 0 }, Ankunft: { stunde: 11, minute: 0 },
             Verkehrstag: "Mo-Fr", Kalenderwoche: 10, // Globale relative KW 10
@@ -626,6 +629,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         const erstellteSlotObjekte = [];
         for (const def of slotDefinitionen) {
             const slotData = {
+                slotTyp: 'TAG',
                 von: def.von, bis: def.bis, Abschnitt: def.Abschnitt,
                 Abfahrt: { stunde: def.AbfahrtStunde, minute: 0 }, Ankunft: { stunde: def.AnkunftStunde, minute: 0 },
                 Verkehrstag: def.Verkehrstag, Kalenderwoche: def.Kalenderwoche, Verkehrsart: def.Verkehrsart, Grundentgelt: def.Grundentgelt
@@ -662,6 +666,126 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         const anfrage_E2 = anfrageErstelltResponse.body.data;
         anfrageErstellt = await Anfrage.findById(anfrage_E2._id);
         //console.log(anfrageErstellt);
+        anfrageErstellt.Status = 'validiert';
+        await anfrageErstellt.save();
+        expect(anfrageErstellt.Status).toBe("validiert");
+
+        // ----- 3. Aktion: Zuordnungsprozess anstoßen -----
+        const zuordnenResponse = await request(app)
+            .post(`/api/anfragen/${anfrage_E2._id}/zuordnen`)
+            .send();
+        
+        // ----- 4. Überprüfung -----
+        expect(zuordnenResponse.status).toBe(200);
+        const aktualisierteAnfrage_E2 = zuordnenResponse.body.data;
+
+        // 4.1 Entgelt
+        const summeGrundentgelteProTag = grundentgelt_AB + grundentgelt_BC; // 100 + 50 = 150
+        const erwartetesGesamtentgelt_E2 = erwarteteBetriebstage_E2 * summeGrundentgelteProTag; // 14 * 150 = 2100
+        expect(aktualisierteAnfrage_E2.Entgelt).toBe(erwartetesGesamtentgelt_E2);
+
+        // 4.2 Zugewiesene Slots
+        expect(aktualisierteAnfrage_E2.ZugewieseneSlots).toHaveLength(8);
+        // Stelle sicher, dass alle erstellten Slot-IDs in den ZugewiesenenSlots der Anfrage sind
+        // und den korrekten Initialstatus haben
+        for (const erstellterSlot of erstellteSlotObjekte) {
+            const zuweisungEintrag = aktualisierteAnfrage_E2.ZugewieseneSlots.find(
+                zs => zs.slot.toString() === erstellterSlot._id.toString()
+            );
+            expect(zuweisungEintrag).toBeDefined();
+            expect(zuweisungEintrag.statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+        }
+
+        // 4.3 (Optional/Sekundär) Überprüfung der Kapazitätstöpfe und Slot-Verknüpfungen
+        const zugewieseneTopfIdsInAnfrage = new Set();
+        for (const slot of erstellteSlotObjekte) {
+             if(slot.VerweisAufTopf) zugewieseneTopfIdsInAnfrage.add(slot.VerweisAufTopf.toString());
+        }
+        expect(zugewieseneTopfIdsInAnfrage.size).toBe(8); // Erwartet 8 verschiedene Töpfe
+
+        for (const topfId of zugewieseneTopfIdsInAnfrage) {
+            const topf = await Kapazitaetstopf.findById(topfId);
+            expect(topf.ListeDerAnfragen.map(id => id.toString())).toContain(anfrage_E2._id.toString());
+        }
+        for (const slot of erstellteSlotObjekte) {
+            const slot_final = await Slot.findById(slot._id);
+            expect(slot_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrage_E2._id.toString());
+        }
+    });
+
+    it('E3: Sollte das Entgelt für eine tägliche Anfrage mit 2 Abschnitten mit Übergang von Tag zu Nacht über 2 KWs korrekt berechnen', async () => {
+        // ----- 1. Vorbereitung: Slot-Muster erstellen -----
+        const grundentgelt_AB = 100;
+        const grundentgelt_BC = 50;
+
+        const slotDefinitionen1 = [
+            // Abschnitt A->B
+            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
+            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 1, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
+            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
+            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 2, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
+            ];
+        const slotDefinitionen2 = [
+            // Abschnitt B->C
+            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
+            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 1, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
+            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
+            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 2, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
+        ];
+
+        const erstellteSlotObjekte = [];
+        for (const def of slotDefinitionen1) {
+            const slotData = {
+                slotTyp: 'TAG',
+                von: def.von, bis: def.bis, Abschnitt: def.Abschnitt,
+                Abfahrt: { stunde: def.AbfahrtStunde, minute: 0 }, Ankunft: { stunde: def.AnkunftStunde, minute: 0 },
+                Verkehrstag: def.Verkehrstag, Kalenderwoche: def.Kalenderwoche, Verkehrsart: def.Verkehrsart, Grundentgelt: def.Grundentgelt
+            };
+            const response = await request(app).post('/api/slots').send(slotData);
+            expect(response.status).toBe(201);
+            erstellteSlotObjekte.push(response.body.data);
+        }
+        for (const def of slotDefinitionen2) {
+            const slotData = {
+                slotTyp: 'NACHT',
+                von: def.von, bis: def.bis, Abschnitt: def.Abschnitt,
+                Zeitfenster: '23-01',
+                Mindestfahrzeit: 60,
+                Maximalfahrzeit: 70,
+                Verkehrstag: def.Verkehrstag, Kalenderwoche: def.Kalenderwoche, Grundentgelt: def.Grundentgelt
+            };
+            const response = await request(app).post('/api/slots').send(slotData);
+            expect(response.status).toBe(201);
+            erstellteSlotObjekte.push(response.body.data);
+        }
+        expect(erstellteSlotObjekte).toHaveLength(8);
+
+        // ----- 2. Anfrage-Daten definieren und Anfrage erstellen -----
+        const zeitraum_E2 = {
+            start: GLOBAL_KW1_START_DATE_ISO, // Mo, 30.12.2024 (Start KW1)
+            ende: "2025-01-12T23:59:59.999Z"  // So, 12.01.2025 (Ende KW2) => 14 Tage
+        };
+        const anfrageVerkehrstag_E2 = "täglich";
+        const erwarteteBetriebstage_E2 = calculateTotalOperatingDaysForAnfrage(zeitraum_E2, anfrageVerkehrstag_E2);
+        expect(erwarteteBetriebstage_E2).toBe(14); // 2 volle Wochen * 7 Tage/Woche
+
+        const anfrageData_E2 = {
+            Zugnummer: "E2_MultiSegment", EVU: "EVU_MS",
+            ListeGewuenschterSlotAbschnitte: [
+                { von: "A", bis: "B", Abfahrtszeit: { stunde: 22, minute: 0 }, Ankunftszeit: { stunde: 23, minute: 0 } },
+                { von: "B", bis: "C", Abfahrtszeit: { stunde: 23, minute: 10 }, Ankunftszeit: { stunde: 0, minute: 15 } }
+            ],
+            Verkehrsart: 'SPFV',
+            Verkehrstag: anfrageVerkehrstag_E2,
+            Zeitraum: zeitraum_E2,
+            Email: "e2@test.com",
+            Status: "validiert"
+        };
+        const anfrageErstelltResponse = await request(app).post('/api/anfragen').send(anfrageData_E2);
+        expect(anfrageErstelltResponse.status).toBe(201);
+        const anfrage_E2 = anfrageErstelltResponse.body.data;
+        anfrageErstellt = await Anfrage.findById(anfrage_E2._id);
+        console.log(anfrageErstellt);
         anfrageErstellt.Status = 'validiert';
         await anfrageErstellt.save();
         expect(anfrageErstellt.Status).toBe("validiert");

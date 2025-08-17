@@ -2,7 +2,7 @@
 const request = require('supertest');
 const mongoose = require('mongoose');
 const app = require('../../server'); // Pfad zu deiner server.js oder app.js
-const Slot = require('../../models/Slot');
+const {Slot, TagesSlot} = require('../../models/Slot');
 const Kapazitaetstopf = require('../../models/Kapazitaetstopf');
 const { parseISO, addDays, format } = require('date-fns');
 const { getGlobalRelativeKW, GLOBAL_KW1_START_DATE_ISO } = require('../../utils/date.helpers'); 
@@ -27,6 +27,7 @@ function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
 
 
 describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
+    //jest.setTimeout(60000);
     // Wenn du manuelle Bereinigung pro Testfall brauchst:
     beforeAll(async () => {
         // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
@@ -52,8 +53,9 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         }
     });
 
-    it('sollte einen Slot erstellen und automatisch einen passenden Kapazitätstopf erzeugen, wenn keiner existiert', async () => {
+    it('sollte einen Tag-Slot erstellen und automatisch einen passenden Kapazitätstopf erzeugen, wenn keiner existiert', async () => {
         const slotData = {
+            slotTyp: "TAG",
             von: "Hamburg Altona",
             bis: "Berlin Hbf",
             Abschnitt: "Hamburg - Berlin", // Wichtig für Topf-Findung/Erstellung
@@ -71,6 +73,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
             .send(slotData);
 
         // Überprüfung der Antwort
+        //console.log(response.body);
         expect(response.status).toBe(201);
         expect(response.body.message).toBe('Slot erfolgreich erstellt und Kapazitätstopf-Verknüpfung hergestellt/geprüft.');
         expect(response.body.data).toBeDefined();
@@ -115,8 +118,74 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
     });
 
-    it('sollte aus einem Slot mit Verkehrstag täglich zwei Slots mit Mo-F und Sa+So erstellen und automatisch einen passenden Kapazitätstopf erzeugen, wenn keiner existiert', async () => {
+    it('sollte einen Nacht-Slot erstellen und automatisch einen passenden Kapazitätstopf erzeugen, wenn keiner existiert', async () => {
         const slotData = {
+            slotTyp: "NACHT",
+            von: "Hamburg Altona",
+            bis: "Berlin Hbf",
+            Abschnitt: "Hamburg - Berlin", // Wichtig für Topf-Findung/Erstellung            
+            Verkehrstag: "Mo-Fr",       // Wichtig für Topf-Findung/Erstellung
+            Kalenderwoche: 23,          // Wichtig für Topf-Findung/Erstellung            
+            Grundentgelt: 150,
+            Zeitfenster: '01-03',
+            Mindestfahrzeit: 35,
+            Maximalfahrzeit: 120
+        };
+
+        // Aktion: Slot erstellen
+        const response = await request(app)
+            .post('/api/slots')
+            .send(slotData);
+
+        // Überprüfung der Antwort
+        //console.log(response.body);
+        expect(response.status).toBe(201);
+        expect(response.body.message).toBe('Slot erfolgreich erstellt und Kapazitätstopf-Verknüpfung hergestellt/geprüft.');
+        expect(response.body.data).toBeDefined();
+        const erstellterSlotResponse = response.body.data;
+        expect(erstellterSlotResponse.SlotID_Sprechend).toBeDefined();
+        expect(erstellterSlotResponse.VerweisAufTopf).toBeDefined();
+        expect(erstellterSlotResponse.VerweisAufTopf).not.toBeNull();
+
+        // Überprüfung direkt in der Datenbank
+        const erstellterSlotDB = await Slot.findById(erstellterSlotResponse._id).populate('VerweisAufTopf');
+        expect(erstellterSlotDB).not.toBeNull();
+        expect(erstellterSlotDB.VerweisAufTopf).not.toBeNull();
+
+        const autoErstellterTopf = erstellterSlotDB.VerweisAufTopf; // Dies ist bereits das populierte Objekt
+        expect(autoErstellterTopf).toBeInstanceOf(Kapazitaetstopf); // Prüfen, ob es ein Kapazitaetstopf-Dokument ist
+
+        // Eigenschaften des auto-erstellten Topfes prüfen
+        expect(autoErstellterTopf.Abschnitt).toBe(slotData.Abschnitt);
+        expect(autoErstellterTopf.Kalenderwoche).toBe(slotData.Kalenderwoche);
+        expect(autoErstellterTopf.Verkehrstag).toBe(slotData.Verkehrstag);
+        expect(autoErstellterTopf.Verkehrsart).toBe('ALLE'); // Da ein neuer Topf nachts ist für ALLE
+
+        
+        expect(autoErstellterTopf.Zeitfenster).toBe(slotData.Zeitfenster);
+        const erwarteteTopfIdTeile = [
+            "KT",
+            slotData.Abschnitt.toUpperCase().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-_]/g, ''),
+            `KW${slotData.Kalenderwoche}`,
+            'ALLE',
+            slotData.Verkehrstag.replace('+', 'u'),
+            `ZF${slotData.Zeitfenster.replace('-', '')}`
+        ];
+        expect(autoErstellterTopf.TopfID).toBe(erwarteteTopfIdTeile.join('-'));
+
+        expect(autoErstellterTopf.TopfID).toBeDefined(); // Sollte durch Hook generiert worden sein
+        expect(autoErstellterTopf.ZeitfensterStartStunde).toBeDefined(); // Sollte durch Hook generiert worden sein
+
+        expect(autoErstellterTopf.ListeDerSlots).toHaveLength(1);
+        expect(autoErstellterTopf.ListeDerSlots[0].toString()).toBe(erstellterSlotDB._id.toString());
+        expect(autoErstellterTopf.maxKapazitaet).toBe(Math.floor(0.7 * 1)); // = 0     
+
+
+    });
+
+    it('sollte aus einem Tag-Slot mit Verkehrstag täglich zwei Slots mit Mo-F und Sa+So erstellen und automatisch einen passenden Kapazitätstopf erzeugen, wenn keiner existiert', async () => {
+        const slotData = {
+            slotTyp: "TAG",
             von: "Hamburg Altona",
             bis: "Berlin Hbf",
             Abschnitt: "Hamburg - Berlin", // Wichtig für Topf-Findung/Erstellung
@@ -139,7 +208,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
         // Überprüfung der Antwort
         expect(response.status).toBe(201);
-        expect(response.body.message).toBe(`Massen-Erstellung abgeschlossen. 2 Slots erfolgreich erstellt. 0 Fehler aufgetreten.`);
+        expect(response.body.message).toBe(`Massen-Erstellung abgeschlossen. 2 TAG-Slots erfolgreich erstellt. 0 Fehler aufgetreten.`);
         expect(response.body.erstellteSlots).toBeDefined();
         const erstellterSlotResponse = response.body.erstellteSlots;
         expect(erstellterSlotResponse.length).toBe(2);
@@ -197,7 +266,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
     });
 
-    it('sollte einen Slot erstellen und einem existierenden Kapazitätstopf (spezifische Verkehrsart) zuordnen', async () => {
+    it('sollte einen Tag-Slot erstellen und einem existierenden Kapazitätstopf (spezifische Verkehrsart) zuordnen', async () => {
         // 1. Vorbereitung: Existierenden Kapazitätstopf erstellen
         const existierenderTopfData = {
             Abschnitt: "Strecke2",
@@ -213,6 +282,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
         // 2. Aktion: Slot erstellen, der exakt zu diesem Topf passt
         const slotData = {
+            slotTyp: "TAG",
             von: "BahnhofC",
             bis: "BahnhofD",
             Abschnitt: "Strecke2", // Passt zu existierenderTopfData.Abschnitt
@@ -246,14 +316,14 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         expect(ktUpdated.maxKapazitaet).toBe(Math.floor(0.7 * 1)); // = 0
     });
 
-    it('sollte einen Slot erstellen und einem existierenden Kapazitätstopf (Verkehrsart "ALLE") zuordnen, wenn kein spezifischerer Topf passt', async () => {
+    it('sollte einen Nacht-Slot erstellen und einem existierenden Kapazitätstopf (Verkehrsart "ALLE") zuordnen', async () => {
         // 1. Vorbereitung: Existierenden Kapazitätstopf mit Verkehrsart 'ALLE' erstellen
         const ktAlleData = {
             Abschnitt: "Strecke3",
             Kalenderwoche: 12,
             Verkehrstag: "Sa+So",
             Verkehrsart: "ALLE", // Wichtig: Topf ist für ALLE Verkehrsarten
-            Zeitfenster: "13-15"
+            Zeitfenster: "23-01"
         };
         const kapazitaetstopfAlle = await new Kapazitaetstopf(ktAlleData).save();
         expect(kapazitaetstopfAlle.ListeDerSlots).toHaveLength(0);
@@ -262,15 +332,19 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         // 2. Aktion: Slot erstellen, dessen spezifische Verkehrsart (SGV)
         // nur vom "ALLE"-Topf abgedeckt wird (es gibt keinen spezifischen SGV-Topf für diese Kriterien).
         const slotDataSGV = {
+            slotTyp: "NACHT",
             von: "PunktE",
             bis: "PunktF",
             Abschnitt: "Strecke3",         // Passt zu ktAlleData.Abschnitt
-            Abfahrt: { stunde: 14, minute: 0 }, // Führt zu Zeitfenster "13-15"
-            Ankunft: { stunde: 14, minute: 45 },
+            //Abfahrt: { stunde: 14, minute: 0 }, // Führt zu Zeitfenster "13-15"
+            //Ankunft: { stunde: 14, minute: 45 },
             Verkehrstag: "Sa+So",             // Passt
             Kalenderwoche: 12,                // Passt
-            Verkehrsart: "SGV",                // Spezifische Verkehrsart des Slots
-            Grundentgelt: 150
+            //Verkehrsart: "SGV",                // Spezifische Verkehrsart des Slots
+            Grundentgelt: 150,
+            Zeitfenster: '23-01',
+            Mindestfahrzeit: 35,
+            Maximalfahrzeit: 120
         };
         const response = await request(app)
             .post('/api/slots')
@@ -295,7 +369,82 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         expect(ktAlleUpdated.maxKapazitaet).toBe(Math.floor(0.7 * 1)); // = 0
     });
 
-    it('sollte mehrere Slots korrekt demselben Kapazitätstopf zuordnen und maxKapazitaet jeweils aktualisieren', async () => {
+    it('sollte zwei Nacht-Slots erstellen und einem existierenden Kapazitätstopf (Verkehrsart "ALLE") zuordnen', async () => {
+        // 1. Vorbereitung: Existierenden Kapazitätstopf mit Verkehrsart 'ALLE' erstellen
+        const ktAlleData = {
+            Abschnitt: "Strecke3",
+            Kalenderwoche: 12,
+            Verkehrstag: "Sa+So",
+            Verkehrsart: "ALLE", // Wichtig: Topf ist für ALLE Verkehrsarten
+            Zeitfenster: "23-01"
+        };
+        const kapazitaetstopfAlle = await new Kapazitaetstopf(ktAlleData).save();
+        expect(kapazitaetstopfAlle.ListeDerSlots).toHaveLength(0);
+        expect(kapazitaetstopfAlle.maxKapazitaet).toBe(0);
+
+        // 2. Aktion: Slot erstellen, dessen spezifische Verkehrsart (SGV)
+        // nur vom "ALLE"-Topf abgedeckt wird (es gibt keinen spezifischen SGV-Topf für diese Kriterien).
+        const slotDataSGV = {
+            slotTyp: "NACHT",
+            von: "PunktE",
+            bis: "PunktF",
+            Abschnitt: "Strecke3",         // Passt zu ktAlleData.Abschnitt
+            //Abfahrt: { stunde: 14, minute: 0 }, // Führt zu Zeitfenster "13-15"
+            //Ankunft: { stunde: 14, minute: 45 },
+            Verkehrstag: "Sa+So",             // Passt
+            Kalenderwoche: 12,                // Passt
+            //Verkehrsart: "SGV",                // Spezifische Verkehrsart des Slots
+            Grundentgelt: 150,
+            Zeitfenster: '23-01',
+            Mindestfahrzeit: 35,
+            Maximalfahrzeit: 120
+        };
+        let response = await request(app)
+            .post('/api/slots')
+            .send(slotDataSGV);
+
+        // 3a. Überprüfung
+        expect(response.status).toBe(201);
+        expect(response.body.data).toBeDefined();
+        let erstellterSlotResponse = response.body.data;
+
+        // Prüfen, ob der Slot dem "ALLE"-Topf zugeordnet wurde
+        expect(erstellterSlotResponse.VerweisAufTopf).toBe(kapazitaetstopfAlle._id.toString());
+
+        // Prüfen, ob kein neuer Topf erstellt wurde (Anzahl der Töpfe sollte 1 sein)
+        let anzahlToepfe = await Kapazitaetstopf.countDocuments();
+        expect(anzahlToepfe).toBe(1);
+
+        // Den "ALLE"-Topf aus der DB laden und seine Aktualisierungen prüfen
+        let ktAlleUpdated = await Kapazitaetstopf.findById(kapazitaetstopfAlle._id);
+        expect(ktAlleUpdated.ListeDerSlots).toHaveLength(1);
+        expect(ktAlleUpdated.ListeDerSlots[0].toString()).toBe(erstellterSlotResponse._id);
+        expect(ktAlleUpdated.maxKapazitaet).toBe(Math.floor(0.7 * 1)); // = 0
+
+        response = await request(app)
+            .post('/api/slots')
+            .send(slotDataSGV);
+
+        // 3b. Überprüfung
+        expect(response.status).toBe(201);
+        expect(response.body.data).toBeDefined();
+        erstellterSlotResponse = response.body.data;
+
+        // Prüfen, ob der Slot dem "ALLE"-Topf zugeordnet wurde
+        expect(erstellterSlotResponse.VerweisAufTopf).toBe(kapazitaetstopfAlle._id.toString());
+
+        // Prüfen, ob kein neuer Topf erstellt wurde (Anzahl der Töpfe sollte 1 sein)
+        anzahlToepfe = await Kapazitaetstopf.countDocuments();
+        expect(anzahlToepfe).toBe(1);
+
+        // Den "ALLE"-Topf aus der DB laden und seine Aktualisierungen prüfen
+        ktAlleUpdated = await Kapazitaetstopf.findById(kapazitaetstopfAlle._id);
+        expect(ktAlleUpdated.ListeDerSlots).toHaveLength(2);
+        expect(ktAlleUpdated.ListeDerSlots[1].toString()).toBe(erstellterSlotResponse._id);
+        expect(ktAlleUpdated.maxKapazitaet).toBe(Math.floor(0.7 * 2)); // = 0
+    });
+
+    it('sollte mehrere Tag-Slots korrekt demselben Kapazitätstopf zuordnen und maxKapazitaet jeweils aktualisieren', async () => {
         // Daten, die für beide Slots zur Zuordnung zum selben Topf führen
         const topfKriterien = {
             Abschnitt: "Gemeinsam",
@@ -304,10 +453,11 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
             Verkehrsart: "SPFV", // für den Topf
             AbfahrtStundeFuerZeitfenster: 9 // ergibt Zeitfenster "09-11"
         };
-        const erwartetesTopfZeitfenster = Slot.mapAbfahrtstundeToKapazitaetstopfZeitfenster(topfKriterien.AbfahrtStundeFuerZeitfenster);
+        const erwartetesTopfZeitfenster = TagesSlot.mapAbfahrtstundeToKapazitaetstopfZeitfenster(topfKriterien.AbfahrtStundeFuerZeitfenster);
 
         // 1. Ersten Slot (SL_A) erstellen -> sollte Topf KT_Multi erzeugen
         const slotDataA = {
+            slotTyp: "TAG",
             von: "StartA", bis: "EndeA", Abschnitt: topfKriterien.Abschnitt,
             Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 },
             Ankunft: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster + 1, minute: 10 },
@@ -334,6 +484,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
         // 2. Zweiten Slot (SL_B) erstellen -> sollte demselben Topf KT_Multi zugeordnet werden
         const slotDataB = {
+            slotTyp: "TAG",
             von: "StartB", bis: "EndeB", Abschnitt: topfKriterien.Abschnitt, // Gleicher Abschnitt
             Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 40 }, // Gleiches Zeitfenster
             Ankunft: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster + 1, minute: 40 },
@@ -360,7 +511,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
     });
 
     // TESTFALL FÜR MASSENERSTELLUNG
-    it('sollte über den /massen-erstellung Endpunkt korrekt 5 Slots für einen Zeitraum von 5 Wochen erstellen', async () => {
+    it('sollte über den /massen-erstellung Endpunkt korrekt 5 Tag-Slots für einen Zeitraum von 5 Wochen erstellen', async () => {
         // ---- 1. Vorbereitung: Definiere das Slot-Muster und den Zeitraum ----
         
         // Zeitraum, der 5 globale relative KWs abdeckt (hier KW 4 bis KW 8)
@@ -370,6 +521,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         const zeitraumEnde = "2025-02-23";
 
         const payload = {
+            slotTyp: "TAG",
             von: "Massen-Start",
             bis: "Massen-Ende",
             Abschnitt: "Massen-Strecke",
@@ -389,7 +541,7 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
 
         // ---- 3. Überprüfung der Antwort ----
         expect(response.status).toBe(201);
-        expect(response.body.message).toContain('5 Slots erfolgreich erstellt');
+        expect(response.body.message).toContain('5 TAG-Slots erfolgreich erstellt');
         expect(response.body.erstellteSlots).toHaveLength(5);
         expect(response.body.fehler).toHaveLength(0);
 
@@ -424,6 +576,84 @@ describe('POST /api/slots - Slot Erstellung mit Kapazitätstopf-Logik', () => {
         expect(topfFuerKW5.ListeDerSlots).toHaveLength(1);
         expect(topfFuerKW5.ListeDerSlots[0].toString()).toBe(slotFuerKW5._id.toString());
         expect(topfFuerKW5.maxKapazitaet).toBe(0);
+    });
+
+    // TESTFALL FÜR MASSENERSTELLUNG
+    it('sollte über den /massen-erstellung Endpunkt korrekt 2x6 Nacht-Slots für einen Zeitraum von 6 Wochen erstellen', async () => {
+        // ---- 1. Vorbereitung: Definiere das Slot-Muster und den Zeitraum ----
+        
+        // Zeitraum, der 5 globale relative KWs abdeckt (hier KW 4 bis KW 8)
+        // KW 4 2025 beginnt am 20.01.2025
+        // KW 8 2025 endet am 23.02.2025
+        const zeitraumStart = "2025-01-20";
+        const zeitraumEnde = "2025-03-02";
+
+        const payload = {
+            slotTyp: "NACHT",
+            von: "Massen-Start",
+            bis: "Massen-Ende",
+            Abschnitt: "Massen-Strecke",
+            Verkehrstag: "Mo-Fr",
+            Grundentgelt: 250,
+            zeitraumStart: zeitraumStart,
+            zeitraumEnde: zeitraumEnde,
+            Zeitfenster: '03-05',
+            Mindestfahrzeit: 35,
+            Maximalfahrzeit: 120
+        };
+
+        // ---- 2. Aktion: Rufe zweimal den Endpunkt zur Massenerstellung auf ----
+        let response = await request(app)
+            .post('/api/slots/massen-erstellung')
+            .send(payload);
+
+        // ---- 3a. Überprüfung der Antwort ----
+        expect(response.status).toBe(201);
+        expect(response.body.message).toContain('6 NACHT-Slots erfolgreich erstellt');
+        expect(response.body.erstellteSlots).toHaveLength(6);
+        expect(response.body.fehler).toHaveLength(0);
+
+        response = await request(app)
+            .post('/api/slots/massen-erstellung')
+            .send(payload);
+
+        // ---- 3b. Überprüfung der Antwort ----
+        expect(response.status).toBe(201);
+        expect(response.body.message).toContain('6 NACHT-Slots erfolgreich erstellt');
+        expect(response.body.erstellteSlots).toHaveLength(6);
+        expect(response.body.fehler).toHaveLength(0);
+
+        // ---- 4. Überprüfung direkt in der Datenbank ----
+
+        // Prüfe, ob 2x6 Slots mit dem korrekten Abschnitt in der DB sind
+        const erstellteSlotsDB = await Slot.find({ Abschnitt: "Massen-Strecke" });
+        expect(erstellteSlotsDB).toHaveLength(12);
+
+        // Prüfe, ob für jede erwartete KW (4, 5, 6, 7, 8, 9) genau ein Slot erstellt wurde
+        const kws = erstellteSlotsDB.map(s => s.Kalenderwoche).sort((a,b) => a-b);
+        expect(kws).toEqual([4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9]);
+
+        // Stichprobenartige Prüfung eines Slots und seines Kapazitätstopfes
+        const slotFuerKW9 = await Slot.findOne({ Abschnitt: "Massen-Strecke", Kalenderwoche: 9 });
+        expect(slotFuerKW9).toBeDefined();
+        expect(slotFuerKW9.von).toBe("Massen-Start");
+        expect(slotFuerKW9.Grundentgelt).toBe(250);
+        expect(slotFuerKW9.VerweisAufTopf).toBeDefined();
+        expect(slotFuerKW9.VerweisAufTopf).not.toBeNull();
+
+        // Überprüfe den zugehörigen, automatisch erstellten Kapazitätstopf für KW 5
+        const topfFuerKW9 = await Kapazitaetstopf.findById(slotFuerKW9.VerweisAufTopf);
+        expect(topfFuerKW9).not.toBeNull();
+        expect(topfFuerKW9.Abschnitt).toBe("Massen-Strecke");
+        expect(topfFuerKW9.Kalenderwoche).toBe(9);
+        expect(topfFuerKW9.Verkehrstag).toBe("Mo-Fr");
+        
+        // Da wir pro Topf-Definition 2 Slots im Setup der anderen Tests erstellt hatten,
+        // hier aber nur einen, sollte maxKapazitaet = 1 sein (floor(0.7*2))
+        // Unser Controller erstellt ja pro Durchlauf einen Slot pro KW, also hat ListeDerSlots Länge 2
+        expect(topfFuerKW9.ListeDerSlots).toHaveLength(2);
+        expect(topfFuerKW9.ListeDerSlots[0].toString()).toBe(slotFuerKW9._id.toString());
+        expect(topfFuerKW9.maxKapazitaet).toBe(1);
     });
 
 
@@ -469,6 +699,7 @@ describe('PUT /api/slots/:slotId - Zuordnung zu neuen Kapazitätstöpfen nach Sl
             }).save();
 
             const slotDataFuerKtx = {
+                slotTyp: "TAG",
                 von: "AA", bis: "BB", Abschnitt: "Nord",
                 Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 50 }, // Passt zu KT_X Zeitfenster 07-09
                 Verkehrstag: "Mo-Fr", Kalenderwoche: 15, Verkehrsart: "SPFV",
@@ -505,6 +736,7 @@ describe('PUT /api/slots/:slotId - Zuordnung zu neuen Kapazitätstöpfen nach Sl
             // Überprüfung der Antwort
             expect(response.status).toBe(200);
             const aktualisierterSlotResponse = response.body.data;
+            console.log(aktualisierterSlotResponse);
             expect(aktualisierterSlotResponse.VerweisAufTopf.toString()).toBe(kt_Y._id.toString()); // Sollte jetzt auf KT_Y zeigen
             expect(aktualisierterSlotResponse.Abschnitt).toBe("Sued");
             expect(aktualisierterSlotResponse.Abfahrt.stunde).toBe(10);
@@ -560,7 +792,7 @@ describe('PUT /api/slots/:slotId - Zuordnung zu neuen Kapazitätstöpfen nach Sl
             expect(ktC_autoErstellt.Kalenderwoche).toBe(16);
             expect(ktC_autoErstellt.Verkehrstag).toBe("Sa+So");
             expect(ktC_autoErstellt.Verkehrsart).toBe("SGV");
-            expect(ktC_autoErstellt.Zeitfenster).toBe(Slot.mapAbfahrtstundeToKapazitaetstopfZeitfenster(13)); // "13-15"
+            expect(ktC_autoErstellt.Zeitfenster).toBe(TagesSlot.mapAbfahrtstundeToKapazitaetstopfZeitfenster(13)); // "13-15"
             
             expect(ktC_autoErstellt.ListeDerSlots).toHaveLength(1);
             const slotIdStringsInListe = ktC_autoErstellt.ListeDerSlots.map(id => id.toString()); // Wandle alle ObjectIds in Strings um
@@ -612,6 +844,7 @@ describe('PUT /api/slots/:slotId - Zuordnung zu neuen Kapazitätstöpfen nach Sl
 
             // Erster Slot (wird später gelöscht)
             const slotData1 = {
+                slotTyp: "TAG",
                 von: "L1", bis: "M1", Abschnitt: topfKriterien.Abschnitt,
                 Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 0 },
                 Ankunft: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 },
@@ -625,6 +858,7 @@ describe('PUT /api/slots/:slotId - Zuordnung zu neuen Kapazitätstöpfen nach Sl
 
             // Zweiter Slot (bleibt bestehen)
             const slotData2 = {
+                slotTyp: "TAG",
                 von: "L2", bis: "M2", Abschnitt: topfKriterien.Abschnitt,
                 Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 15 },
                 Ankunft: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 45 },

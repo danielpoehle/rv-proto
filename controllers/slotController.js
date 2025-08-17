@@ -1,138 +1,87 @@
 // slot-buchungs-app/controllers/slotController.js
 const mongoose = require('mongoose');
-const Slot = require('../models/Slot');
+const {Slot} = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
-const kapazitaetstopfService = require('../utils/kapazitaetstopf.service'); // <-- NEUER Import
 const { parseISO } = require('date-fns');
 const { GLOBAL_KW1_START_DATE, getGlobalRelativeKW } = require('../utils/date.helpers');
+const slotService = require('../utils/slot.service');
+const { findOrCreateKapazitaetstopf, updateTopfSlotsAndCapacity } = require('../utils/slotController.helpers');
 
 
-// Hilfsfunktion: Findet oder erstellt einen Kapazitätstopf basierend auf Slot-Kriterien
-async function findOrCreateKapazitaetstopf(slotData) {
-    //console.log(slotData);
-    const { Abschnitt, Kalenderwoche, Verkehrstag, Verkehrsart: slotVerkehrsart, Abfahrt } = slotData;
-    const passendesZeitfenster = Slot.mapAbfahrtstundeToKapazitaetstopfZeitfenster(Abfahrt.stunde);
 
-    if (!passendesZeitfenster || !Abschnitt) return null;
-
-    // 1. Versuche, Topf mit spezifischer Verkehrsart zu finden
-    let topf = await Kapazitaetstopf.findOne({
-        Abschnitt, Kalenderwoche, Verkehrstag,
-        Zeitfenster: passendesZeitfenster, Verkehrsart: slotVerkehrsart
-    });
-
-    // 2. Wenn nicht gefunden, versuche, Topf mit Verkehrsart 'ALLE' zu finden
-    if (!topf) {
-        topf = await Kapazitaetstopf.findOne({
-            Abschnitt, Kalenderwoche, Verkehrstag,
-            Zeitfenster: passendesZeitfenster, Verkehrsart: 'ALLE'
-        });
-    }
-
-    // 3. Wenn immer noch nicht gefunden, erstelle einen neuen Topf
-    if (!topf) {
-        console.log(`Kein passender Kapazitätstopf gefunden. Erstelle neuen Topf mit Verkehrsart: ${slotVerkehrsart}`);
-        const topfDataToCreate = {
-            Abschnitt, Kalenderwoche, Verkehrstag,
-            Verkehrsart: slotVerkehrsart, // Nimmt die spezifische Verkehrsart des Slots
-            Zeitfenster: passendesZeitfenster,
-        };
-        try {
-            // Hier wird jetzt die zentrale Funktion mit der Verknüpfungslogik aufgerufen!
-            topf = await kapazitaetstopfService.createAndLinkKapazitaetstopf(topfDataToCreate);
-
-        } catch (createError) {
-            // ... (Fehlerbehandlung wie zuvor, ggf. erneuter Find-Versuch bei unique-Kollision) ...
-            if (createError.code === 11000) {
-                console.warn("Kollision beim Erstellen des Kapazitätstopfes, versuche erneut zu finden:", createError.keyValue);
-                const queryForRetry = { Abschnitt, Kalenderwoche, Verkehrstag, Zeitfenster: passendesZeitfenster,
-                    $or: [{ Verkehrsart: slotVerkehrsart }, { Verkehrsart: 'ALLE' }] };
-                topf = await Kapazitaetstopf.findOne(queryForRetry);
-                if (!topf) {
-                    console.error("Konnte Kapazitätstopf auch nach Kollision nicht finden.", createError);
-                    throw createError;
-                }
-            } else {
-                console.error("Fehler beim automatischen Erstellen des Kapazitätstopfes:", createError);
-                throw createError;
-            }
-        }
-    }
-    return topf;
-}
-
-
-// Hilfsfunktion zum Aktualisieren von ListeDerSlots und maxKapazitaet eines Topfes
-async function updateTopfSlotsAndCapacity(topfId, slotId, operationType) { // op: 'add' or 'remove'
-    if (!topfId) return;
-    const topf = await Kapazitaetstopf.findById(topfId);
-    if (!topf) {
-        console.warn(`Kapazitätstopf ${topfId} nicht gefunden für Kapazitätsupdate.`);
-        return;
-    }
-
-    const slotObjectId = new mongoose.Types.ObjectId(slotId);
-    let lengthBefore = topf.ListeDerSlots.length;
-
-    if (operationType === 'add') {
-        topf.ListeDerSlots.addToSet(slotObjectId);
-    } else if (operationType === 'remove') {
-        topf.ListeDerSlots.pull(slotObjectId);
-    }
-
-    // Nur speichern und loggen, wenn sich die Liste tatsächlich geändert hat
-    if (topf.ListeDerSlots.length !== lengthBefore || topf.isModified('ListeDerSlots')) {
-        topf.maxKapazitaet = Math.floor(0.7 * topf.ListeDerSlots.length);
-        topf.markModified('maxKapazitaet'); // Sicherstellen, dass auch 0 gespeichert wird
-        await topf.save();
-        console.log(`Kapazitätstopf ${topf.TopfID || topf._id} aktualisiert: ${operationType} slot ${slotId}. Neue maxKap: ${topf.maxKapazitaet}. Slots: ${topf.ListeDerSlots.length}`);
-    }
-}
 
 // @desc    Erstellt einen neuen Infrastruktur-Slot
 // @route   POST /api/slots
-exports.createSlot = async (req, res) => {
-    try {
+exports.createSlot = async (req, res) => {    
+        const { 
+            slotTyp, // NEU: 'TAG' oder 'NACHT'
+            von, bis, Abschnitt, Verkehrstag, Grundentgelt, Linienbezeichnung,
+            Kalenderwoche,
+            // Tag-spezifisch:
+            Abfahrt, Ankunft, Verkehrsart,
+            // Nacht-spezifisch:
+            Zeitfenster, Mindestfahrzeit, Maximalfahrzeit
+        } = req.body;
+
         //console.log(req.body);
-        const { von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, Kalenderwoche, Verkehrsart, Grundentgelt, Linienbezeichnung } = req.body;
 
-        // ... (Validierung von Pflichtfeldern und Ankunft > Abfahrt) ...
-        if (!Abschnitt) return res.status(400).json({message: 'Abschnitt ist ein Pflichtfeld.'});
-        // ...
-
-        const potenziellerTopf = await findOrCreateKapazitaetstopf({ Abschnitt, Kalenderwoche, Verkehrstag, Verkehrsart, Abfahrt });
-
-        const neuerSlot = new Slot({
-            von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag,
-            Kalenderwoche, Verkehrsart, Grundentgelt,
-            VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null,
-            Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
-        });
-
-        const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
-
-        // Bidirektionale Verknüpfung: Slot zum (gefundenen oder neu erstellten) Kapazitätstopf hinzufügen
-        if (gespeicherterSlot.VerweisAufTopf) {
-            await updateTopfSlotsAndCapacity(gespeicherterSlot.VerweisAufTopf, gespeicherterSlot._id, 'add');
+        //0. Validierung ob slotTyp gesetzt wurde
+        if(!slotTyp){
+            return res.status(400).json({ message: 'Bitte slotTyp setzen.' });
         }
 
-        res.status(201).json({
+        // 1. Validierung der Eingabedaten
+        if(slotTyp === 'TAG'){
+            if (!von || !bis || !Abschnitt || !Abfahrt || !Ankunft || !Verkehrstag || !Grundentgelt || !Verkehrsart || !Kalenderwoche ) {                
+                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Tag) ausfüllen.' });
+            }
+        }else{ // Nacht-Slot
+            if (!von || !bis || !Abschnitt || !Zeitfenster || !Mindestfahrzeit || !Verkehrstag || !Grundentgelt || !Maximalfahrzeit || !Kalenderwoche ) {
+                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Nacht) ausfüllen.' });
+            }
+        }        
+
+        if(!['Mo-Fr', 'Sa+So'].includes(Verkehrstag)){
+            return res.status(400).json({ message: 'Verkehrstag Mo-Fr oder Sa+So ist nur zulässig' });
+        }
+
+        const slotData = {
+                    slotTyp, von, bis, Abschnitt, Grundentgelt, 
+                    Linienbezeichnung: Linienbezeichnung || undefined,
+                    Kalenderwoche,
+                    Verkehrstag,
+                    // Füge typspezifische Daten hinzu
+                    ...(slotTyp === 'NACHT'
+                        ? { Zeitfenster, Mindestfahrzeit, Maximalfahrzeit }
+                        : { Abfahrt, Ankunft, Verkehrsart }
+                    )
+                };
+
+        try {
+            // Rufe die zentrale Service-Funktion auf
+            const erstellterSlot = await slotService.createSingleSlot(slotData);   
+            res.status(201).json({
             message: 'Slot erfolgreich erstellt und Kapazitätstopf-Verknüpfung hergestellt/geprüft.',
-            data: gespeicherterSlot
-        });
+            data: erstellterSlot
+        });                        
 
-    } catch (error) {
-        // ... (Fehlerbehandlung für Slot-Erstellung) ...
-        console.error('Fehler beim Erstellen des Slots:', error);
-        // ... (Standardfehlerbehandlung)
-         if (error.name === 'ValidationError') {
-            return res.status(400).json({ message: 'Validierungsfehler.', errors: Object.values(error.errors).map(e => e.message) });
-        }
-        if (error.code === 11000 && error.keyPattern && error.keyPattern.SlotID_Sprechend) {
-             return res.status(409).json({ message: 'Ein Slot mit diesen Eigenschaften (resultierend in derselben SlotID_Sprechend) existiert bereits.'});
-        }
-        res.status(500).json({ message: 'Serverfehler beim Erstellen des Slots.' });
-    }
+        } catch (err) {
+            console.error(`Fehler beim Erstellen von ${slotTyp}-Slot für KW ${Kalenderwoche} / VT ${Verkehrstag}:`, err);
+            // Prüfe auf spezifische Fehler, z.B. wenn der Slot schon existiert (unique-Verletzung)
+            if (err.code === 11000) {
+                return res.status(409).json({ // 409 Conflict
+                    message: 'Ein Slot mit dieser sprechenden ID existiert bereits.',
+                    errorDetails: err.message
+                });
+            }
+            
+            // Allgemeiner Serverfehler
+            res.status(500).json({
+                message: 'Ein interner Fehler ist beim Erstellen des Slots aufgetreten.',
+                errorDetails: err.message
+            });                            
+        }    
+        //console.log("finished createSlot");     
 };
 
 // @desc    Ruft alle Slots ab
@@ -157,6 +106,7 @@ exports.getAllSlots = async (req, res) => {
             sortOptions[parts[0]] = parts[1] === 'desc' ? -1 : 1;
         } else {
             sortOptions['Kalenderwoche'] = 1; // Standard: nach KW sortieren
+            sortOptions['Abschnitt'] = 1;
             sortOptions['Abfahrt.stunde'] = 1;
             sortOptions['Abfahrt.minute'] = 1;
         }
@@ -322,6 +272,7 @@ exports.updateSlot = async (req, res) => {
         let neuerVerweisAufTopf = alterVerweisAufTopf; // Initial annehmen, dass es gleich bleibt
         if (relevanteFelderGeaendert) {
             const potenziellerNeuerTopf = await findOrCreateKapazitaetstopf({
+                slotTyp: slot.slotTyp,
                 Abschnitt: slot.Abschnitt,
                 Kalenderwoche: slot.Kalenderwoche,
                 Verkehrstag: slot.Verkehrstag,
@@ -415,20 +366,35 @@ exports.deleteSlot = async (req, res) => {
     }
 };
 
-// @desc    Erstellt mehrere Slots in einem Massenvorgang
+// @desc    Erstellt mehrere Slots in einem Massenvorgang (Tag oder Nacht)
 // @route   POST /api/slots/massen-erstellung
 exports.createSlotsBulk = async (req, res) => {
     try {
         const { 
-            von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag, 
-            Grundentgelt, Verkehrsart, zeitraumStart, zeitraumEnde,
-            Linienbezeichnung 
+            slotTyp, // NEU: 'TAG' oder 'NACHT'
+            von, bis, Abschnitt, Verkehrstag, Grundentgelt, Linienbezeichnung,
+            zeitraumStart, zeitraumEnde,
+            // Tag-spezifisch:
+            Abfahrt, Ankunft, Verkehrsart,
+            // Nacht-spezifisch:
+            Zeitfenster, Mindestfahrzeit, Maximalfahrzeit
         } = req.body;
 
-        // 1. Validierung der Eingabedaten
-        if (!von || !bis || !Abschnitt || !Abfahrt || !Ankunft || !Verkehrstag || !Grundentgelt || !Verkehrsart || !zeitraumStart || !zeitraumEnde) {
-            return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung ausfüllen.' });
+        if(!slotTyp){
+            return res.status(400).json({ message: 'Slot-Typ fehlt.' });
         }
+
+        // 1. Validierung der Eingabedaten
+        if(slotTyp === 'TAG'){
+            if (!von || !bis || !Abschnitt || !Abfahrt || !Ankunft || !Verkehrstag || !Grundentgelt || !Verkehrsart || !zeitraumStart || !zeitraumEnde) {
+                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Tag) ausfüllen.' });
+            }
+        }else{ // Nacht-Slot
+            if (!von || !bis || !Abschnitt || !Zeitfenster || !Mindestfahrzeit || !Verkehrstag || !Grundentgelt || !Maximalfahrzeit || !zeitraumStart || !zeitraumEnde) {
+                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Nacht) ausfüllen.' });
+            }
+        }
+        
 
         const startDate = parseISO(zeitraumStart);
         const endDate = parseISO(zeitraumEnde);
@@ -460,45 +426,33 @@ exports.createSlotsBulk = async (req, res) => {
         for (let kw = startKW; kw <= endKW; kw++) {
             for (const vt of verkehrstageToCreate) {
                 const slotData = {
-                    von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag: vt,
-                    Grundentgelt, Verkehrsart,
+                    slotTyp, von, bis, Abschnitt, Grundentgelt, 
+                    Linienbezeichnung: Linienbezeichnung || undefined,
                     Kalenderwoche: kw,
-                    Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
-                };
-
-                // Wir nutzen die Logik aus unserem `createSlot`-Controller wieder,
-                // indem wir sie in eine Service-Funktion auslagern oder hier nachbilden.
-                // Der Einfachheit halber bilden wir sie hier nach.
+                    Verkehrstag: vt,
+                    // Füge typspezifische Daten hinzu
+                    ...(slotTyp === 'NACHT'
+                        ? { Zeitfenster, Mindestfahrzeit, Maximalfahrzeit }
+                        : { Abfahrt, Ankunft, Verkehrsart }
+                    )
+                };                
                 
                 try {
-                    const potenziellerTopf = await findOrCreateKapazitaetstopf({ Abschnitt, Kalenderwoche: kw, Verkehrstag: vt, Verkehrsart, Abfahrt });
-
-                    const neuerSlot = new Slot({ von, bis, Abschnitt, Abfahrt, Ankunft, Verkehrstag: vt,
-                                                Kalenderwoche: kw, Verkehrsart, Grundentgelt,
-                                                VerweisAufTopf: potenziellerTopf ? potenziellerTopf._id : null,
-                                                Linienbezeichnung: Linienbezeichnung || undefined // Stelle sicher, dass es undefined ist, wenn leer
-                    });
-
-                    const gespeicherterSlot = await neuerSlot.save(); // pre-save Hook für SlotID_Sprechend läuft
-
-                    // Bidirektionale Verknüpfung: Slot zum (gefundenen oder neu erstellten) Kapazitätstopf hinzufügen
-                    if (gespeicherterSlot.VerweisAufTopf) {
-                        await updateTopfSlotsAndCapacity(gespeicherterSlot.VerweisAufTopf, gespeicherterSlot._id, 'add');
-                    }
-
-                    erstellteSlots.push(gespeicherterSlot);
+                    // Rufe die zentrale Service-Funktion auf
+                    const erstellterSlot = await slotService.createSingleSlot(slotData);
+                    erstellteSlots.push(erstellterSlot);
 
                 } catch (err) {
-                    console.error(`Fehler beim Erstellen von Slot für KW ${kw}:`, err);
+                    console.error(`Fehler beim Erstellen von ${slotTyp}-Slot für KW ${kw} / VT ${vt}:`, err);
                     // Wenn ein Slot wegen einer unique-Verletzung (existiert schon) fehlschlägt,
                     // loggen wir den Fehler und machen mit dem nächsten weiter.
-                    fehler.push(`KW ${kw}: ${err.message}`);
+                    fehler.push(`${slotTyp}-Slot KW ${kw} VT ${vt}: ${err.message}`);
                 }
             }
         }
 
         res.status(201).json({
-            message: `Massen-Erstellung abgeschlossen. ${erstellteSlots.length} Slots erfolgreich erstellt. ${fehler.length} Fehler aufgetreten.`,
+            message: `Massen-Erstellung abgeschlossen. ${erstellteSlots.length} ${slotTyp}-Slots erfolgreich erstellt. ${fehler.length} Fehler aufgetreten.`,
             erstellteSlots,
             fehler
         });
@@ -605,7 +559,9 @@ exports.getSlotCounterSummary = async (req, res) => {
                         ankunft: "$Ankunft",
                         verkehrsart: "$Verkehrsart",
                         abschnitt: "$Abschnitt",
-                        linie: "$Linienbezeichnung"
+                        linie: "$Linienbezeichnung",
+                        slotTyp: "$slotTyp",
+                        zeitfenster: "$Zeitfenster"
                     },
                     // Sammle für jedes Muster die Kalenderwoche und den Verkehrstag
                     kws: { $push: { kw: "$Kalenderwoche", vt: "$Verkehrstag" } }
@@ -687,16 +643,24 @@ exports.getSlotCounterSummary = async (req, res) => {
 // @route   GET /api/slots/by-muster
 exports.getSlotsByMuster = async (req, res) => {
     try {
-        const { von, bis, abfahrtStunde, abfahrtMinute, ankunftStunde, ankunftMinute, Verkehrsart, Abschnitt } = req.query;
+        const { von, bis, abfahrtStunde, abfahrtMinute, ankunftStunde, ankunftMinute, verkehrsart, abschnitt, slotTyp, zeitfenster } = req.query;
 
+        const istTagSlot = slotTyp === 'TAG';
         // Baue eine exakte Übereinstimmungsabfrage
-        const matchQuery = {
-            von, bis, Abschnitt, Verkehrsart,
-            'Abfahrt.stunde': parseInt(abfahrtStunde),
-            'Abfahrt.minute': parseInt(abfahrtMinute),
-            'Ankunft.stunde': parseInt(ankunftStunde),
-            'Ankunft.minute': parseInt(ankunftMinute),
-        };
+        const baseParams = {
+                            von, bis, slotTyp, 'Verkehrsart': verkehrsart, 'Abschnitt': abschnitt,
+                           };
+
+        const matchQuery = istTagSlot ? {     
+                                            ...baseParams,
+                                            'Abfahrt.stunde': parseInt(abfahrtStunde),
+                                            'Abfahrt.minute': parseInt(abfahrtMinute),
+                                            'Ankunft.stunde': parseInt(ankunftStunde),
+                                            'Ankunft.minute': parseInt(ankunftMinute),
+                                        }: {
+                                            ...baseParams,
+                                            'Zeitfenster': zeitfenster,
+                                        };
 
         //console.log('DEBUG: Suche Slots mit folgender exakter Query:', matchQuery);
 
@@ -758,5 +722,53 @@ exports.deleteSlotsBulk = async (req, res) => {
     } catch (error) {
         console.error('Fehler beim Massenlöschen von Slots:', error);
         res.status(500).json({ message: 'Serverfehler beim Massenlöschen.' });
+    }
+};
+
+// @desc    Migriert alte Slot-Dokumente zum neuen Discriminator-Schema
+// @route   POST /api/slots/migrate-to-discriminator
+exports.migrateAlteSlots = async (req, res) => {
+    try {
+        console.log("Starte Migration für alte Slot-Dokumente mit direkter Methode...");
+
+        // Schritt 1: Definiere ein temporäres, einfaches Schema, das die ALTEN Dokumente beschreibt.
+        // Wichtig: KEIN discriminatorKey hier!
+        const SimpleSlotSchema = new mongoose.Schema({
+            Abfahrt: Object, // Wir brauchen nur die Existenz dieses Feldes für den Filter
+            // Wir müssen nicht alle Felder definieren, nur die, die wir für die Operation brauchen.
+        }, { 
+            strict: false, // Erlaube andere Felder, die im Schema nicht definiert sind
+            collection: 'slots' // Sage Mongoose explizit, welche Collection es verwenden soll
+        });
+
+        // Schritt 2: Erstelle ein temporäres Mongoose-Modell.
+        // Wir prüfen, ob es schon existiert, um Fehler bei schnellen wiederholten Aufrufen zu vermeiden.
+        const TempSlotModel = mongoose.models.TempSlotForMigration || mongoose.model('TempSlotForMigration', SimpleSlotSchema);
+
+        // Schritt 3: Definiere Filter und Update wie zuvor.
+        const filter = {
+            slotTyp: { $exists: false },
+            Abfahrt: { $exists: true }
+        };
+        const update = {
+            $set: { slotTyp: 'TAG' }
+        };
+
+        // Schritt 4: Führe updateMany auf dem TEMPORÄREN Modell aus.
+        const result = await TempSlotModel.updateMany(filter, update);
+
+        console.log("Migration abgeschlossen:", result);
+
+        res.status(200).json({
+            message: 'Slot-Migration erfolgreich abgeschlossen.',
+            summary: {
+                gefundeneDokumente: result.matchedCount,
+                aktualisierteDokumente: result.modifiedCount
+            }
+        });
+
+    } catch (error) {
+        console.error('Fehler bei der Slot-Migration:', error);
+        res.status(500).json({ message: 'Serverfehler bei der Migration.' });
     }
 };

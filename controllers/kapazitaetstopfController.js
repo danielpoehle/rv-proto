@@ -1,7 +1,7 @@
 // slot-buchungs-app/controllers/kapazitaetstopfController.js
 const mongoose = require('mongoose');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf'); // Das aktualisierte Modell
-const Slot = require('../models/Slot'); // Benötigt für die Prüfung von Referenzen
+const {Slot} = require('../models/Slot'); // Benötigt für die Prüfung von Referenzen
 const kapazitaetstopfService = require('../utils/kapazitaetstopf.service'); // <-- NEUER Import
 
 // @desc    Erstellt einen neuen Kapazitätstopf
