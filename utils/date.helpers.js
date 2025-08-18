@@ -1,4 +1,4 @@
-const { differenceInCalendarWeeks, parseISO, startOfWeek } = require('date-fns');
+const { differenceInCalendarWeeks, parseISO, startOfWeek, startOfUTCDay } = require('date-fns');
 
 
 // Globale Konstante für den Start der allerersten relativen Kalenderwoche (KW 1)
@@ -10,14 +10,20 @@ const GLOBAL_KW1_START_DATE = startOfWeek(parseISO(GLOBAL_KW1_START_DATE_ISO), {
 function getGlobalRelativeKW(currentDateStr) {
     try {
         const currentDate = parseISO(currentDateStr.toISOString ? currentDateStr.toISOString() : currentDateStr); // Akzeptiert Date-Objekt oder ISO-String
+
+        
+
+
         const startOfCurrentDateWeek = startOfWeek(currentDate, { weekStartsOn: 1 });
+
+        //console.log(`currentDate ${currentDate} startOfCurrentDateWeek ${startOfCurrentDateWeek} return ${differenceInCalendarWeeks(startOfCurrentDateWeek.toISOString(), GLOBAL_KW1_START_DATE.toISOString(), { weekStartsOn: 1 }) + 1}`);
 
         if (startOfCurrentDateWeek < GLOBAL_KW1_START_DATE) {
             // Datum liegt vor dem Start des globalen Kalendersystems
             return null; // Oder Fehler werfen, je nach Anforderung
         }
         
-        return differenceInCalendarWeeks(startOfCurrentDateWeek, GLOBAL_KW1_START_DATE, { weekStartsOn: 1 }) + 1;
+        return (differenceInCalendarWeeks(startOfCurrentDateWeek, GLOBAL_KW1_START_DATE, { weekStartsOn: 1 }) + 1);
     } catch (e) {
         console.error("Fehler in getGlobalRelativeKW für Datum:", currentDateStr, e);
         return null;

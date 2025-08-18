@@ -13,7 +13,8 @@ const gewuenschterSlotAbschnittSchema = new Schema({
     Ankunftszeit: { // NEU: Gewünschte Ankunftszeit für diesen spezifischen Abschnitt
         stunde: { type: Number, required: true, min: 0, max: 23 },
         minute: { type: Number, required: true, min: 0, max: 59 }
-    }
+    },
+    dayOffset: {type: Number, required: true, default: 0}
 }, { _id: false });
 
 // Sub-Schema für den Status einer einzelnen Slot-Zuweisung innerhalb einer Anfrage

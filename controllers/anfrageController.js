@@ -9,11 +9,17 @@ const anfrageService = require('../utils/anfrage.service');
 
 
 // Hilfsfunktion: Konvertiert {stunde, minute} zu Minuten seit Mitternacht
-const timeToMinutes = (timeObj) => timeObj.stunde * 60 + timeObj.minute;
+// dayOffset: Anzahl Stunden wegen Tageswechsel
+const timeToMinutes = (timeObj, dayOffset) => {
+    return ((timeObj.stunde + dayOffset) * 60 + timeObj.minute);
+}
 
 // HILFSFUNKTION für die Validierung von Anfragedaten
 function validateAnfrageLogic(data) {
-    const { ListeGewuenschterSlotAbschnitte, Zeitraum, Verkehrsart } = data;
+    const { Zeitraum, Verkehrsart } = data;
+    let { ListeGewuenschterSlotAbschnitte } = data;
+    
+    //console.log(`ListeGewuenschterSlotAbschnitte vorher ${JSON.stringify(ListeGewuenschterSlotAbschnitte)}`);
     let validierungsfehler = [];
 
     // Basis-Validierung der übergebenen Daten (nur auf Existenz, Typen prüft Mongoose/Schema)
@@ -46,9 +52,10 @@ function validateAnfrageLogic(data) {
     }
 
     // Validierung der Slot-Abschnitte
+    let dayOffset = 0;
     for (let i = 0; i < ListeGewuenschterSlotAbschnitte.length; i++) {
         const currentSegment = ListeGewuenschterSlotAbschnitte[i];
-        const nextSegment = ListeGewuenschterSlotAbschnitte[i + 1];
+        const nextSegment = ListeGewuenschterSlotAbschnitte[i + 1];        
 
         if (!currentSegment.von || !currentSegment.bis || !currentSegment.Abfahrtszeit || !currentSegment.Ankunftszeit ||
             typeof currentSegment.Abfahrtszeit.stunde !== 'number' || typeof currentSegment.Abfahrtszeit.minute !== 'number' ||
@@ -57,12 +64,21 @@ function validateAnfrageLogic(data) {
             continue;
         }
 
-        const abfahrtAktuellMinuten = timeToMinutes(currentSegment.Abfahrtszeit);
-        const ankunftAktuellMinuten = timeToMinutes(currentSegment.Ankunftszeit);
+        //Wenn (mehrfacher) Tageswechsel detektiert wurde, dann speichern wir das Offset
+        ListeGewuenschterSlotAbschnitte[i].dayOffset = dayOffset;
 
-        if (ankunftAktuellMinuten <= abfahrtAktuellMinuten) {
-            validierungsfehler.push(`K2a (Abschnitt ${i + 1}: ${currentSegment.von} -> ${currentSegment.bis}): Ankunftszeit (${currentSegment.Ankunftszeit.stunde}:${String(currentSegment.Ankunftszeit.minute).padStart(2, '0')}) muss nach Abfahrtszeit (${currentSegment.Abfahrtszeit.stunde}:${String(currentSegment.Abfahrtszeit.minute).padStart(2, '0')}) liegen.`);
-        }
+        const abfahrtAktuellMinuten = timeToMinutes(currentSegment.Abfahrtszeit, dayOffset);
+        const ankunftAktuellMinuten = timeToMinutes(currentSegment.Ankunftszeit, dayOffset);
+
+        //console.log(`Abfahrt ${abfahrtAktuellMinuten} zu Ankunft ${ankunftAktuellMinuten} in Abschnitt ${i}.`);
+
+        if (ankunftAktuellMinuten < abfahrtAktuellMinuten) {
+            dayOffset += 24;
+            //console.log(`Tageswechsel detektiert in Fahrzeit Abschnitt ${i}.`);
+            //Tageswechsel detektiert            
+            //validierungsfehler.push(`K2a (Abschnitt ${i + 1}: ${currentSegment.von} -> ${currentSegment.bis}): Ankunftszeit (${currentSegment.Ankunftszeit.stunde}:${String(currentSegment.Ankunftszeit.minute).padStart(2, '0')}) muss nach Abfahrtszeit (${currentSegment.Abfahrtszeit.stunde}:${String(currentSegment.Abfahrtszeit.minute).padStart(2, '0')}) liegen.`);
+        }        
+
         if (currentSegment.von === currentSegment.bis) {
             validierungsfehler.push(`K4a (Abschnitt ${i + 1}: ${currentSegment.von} -> ${currentSegment.bis}): Start- und Endpunkt dürfen nicht identisch sein.`);
         }
@@ -74,12 +90,28 @@ function validateAnfrageLogic(data) {
                 if (currentSegment.bis !== nextSegment.von) {
                     validierungsfehler.push(`K1 (Übergang ${i + 1} -> ${i + 2}): Räumliche Inkonsistenz. Endpunkt "${currentSegment.bis}" von Abschnitt ${i + 1} stimmt nicht mit Startpunkt "${nextSegment.von}" von Abschnitt ${i + 2} überein.`);
                 }
-                const abfahrtNaechsterMinuten = timeToMinutes(nextSegment.Abfahrtszeit);
+                let abfahrtNaechsterMinuten = timeToMinutes(nextSegment.Abfahrtszeit, dayOffset);
+
+                if(abfahrtNaechsterMinuten < ankunftAktuellMinuten){
+                    dayOffset += 24;
+                    //console.log(`Tageswechsel detektiert bei Übergang von Abschnitt ${i} zu ${i+1}.`);
+                    //Tageswechsel detektiert 
+                    abfahrtNaechsterMinuten = timeToMinutes(nextSegment.Abfahrtszeit, dayOffset);
+                }
+
                 if (abfahrtNaechsterMinuten <= (ankunftAktuellMinuten + aktuellePufferzeitMinuten)) {
                     validierungsfehler.push(`K2b (Übergang ${i + 1} -> ${i + 2}): Zeitliche Inkonsistenz für Verkehrsart ${Verkehrsart}. Abfahrt Abschnitt ${i + 2} (${nextSegment.Abfahrtszeit.stunde}:${String(nextSegment.Abfahrtszeit.minute).padStart(2, '0')}) muss mindestens ${aktuellePufferzeitMinuten} Min. nach Ankunft Abschnitt ${i + 1} (${currentSegment.Ankunftszeit.stunde}:${String(currentSegment.Ankunftszeit.minute).padStart(2, '0')}) liegen.`);
                 }
             }
         }
+    }
+
+    const abfahrtErsterAbschnitt = timeToMinutes(ListeGewuenschterSlotAbschnitte[0].Abfahrtszeit, ListeGewuenschterSlotAbschnitte[0].dayOffset);
+    const ankunftLetzerAbschnitt = timeToMinutes(ListeGewuenschterSlotAbschnitte[ListeGewuenschterSlotAbschnitte.length - 1].Ankunftszeit, ListeGewuenschterSlotAbschnitte[ListeGewuenschterSlotAbschnitte.length - 1].dayOffset);
+    
+    //Validierung, ob Gesamtfahrzeit inkl Tageswechsel größer als 14 Stunden ist
+    if((ankunftLetzerAbschnitt - abfahrtErsterAbschnitt) > (60*14)){
+        validierungsfehler.push(`Gesamtfahrzeit von ${(ankunftLetzerAbschnitt - abfahrtErsterAbschnitt)/60.0} Stunden: Maximal 14,0 Stunden zulässig.`);
     }
 
     for (let i = 0; i < ListeGewuenschterSlotAbschnitte.length - 1; i++) {
@@ -90,16 +122,19 @@ function validateAnfrageLogic(data) {
              validierungsfehler.push(`K4b (Abschnitte ${i+1}-${i+2}): Direkte Umkehrung der Fahrtrichtung (${seg1.von} -> ${seg1.bis} dann ${seg2.von} -> ${seg2.bis}) ist nicht erlaubt.`);
         }
     }
-    return { errors: validierungsfehler, isValid: validierungsfehler.length === 0 };
+    //console.log(`ListeGewuenschterSlotAbschnitte nachher ${ListeGewuenschterSlotAbschnitte[2]}`);
+    return { errors: validierungsfehler, isValid: validierungsfehler.length === 0, listeGewuenschterSlotAbschnitte: ListeGewuenschterSlotAbschnitte };
 }
 
 // exports.createAnfrage wurde angepasst, um validateAnfrageLogic zu nutzen
 exports.createAnfrage = async (req, res) => {
     try {
         const {
-            Zugnummer, EVU, ListeGewuenschterSlotAbschnitte, Verkehrsart,
+            Zugnummer, EVU, Verkehrsart,
             Verkehrstag, Zeitraum, Email
-        } = req.body;
+        } = req.body;        
+
+        let { ListeGewuenschterSlotAbschnitte } = req.body;
 
         //console.log(req.body);
 
@@ -122,10 +157,11 @@ exports.createAnfrage = async (req, res) => {
         }
 
         // Detailvalidierung mit der Hilfsfunktion
+        //console.log("Aufruf der Validierungsfunktion.")
         const validationResult = validateAnfrageLogic({ ListeGewuenschterSlotAbschnitte, Zeitraum, Verkehrsart });
 
         const neueAnfrage = new Anfrage({
-            Zugnummer, EVU, ListeGewuenschterSlotAbschnitte, Verkehrsart,
+            Zugnummer, EVU, ListeGewuenschterSlotAbschnitte: validationResult.listeGewuenschterSlotAbschnitte, Verkehrsart,
             Verkehrstag, Zeitraum, Email,
             Status: validationResult.isValid ? 'validiert' : 'ungueltig',
             Validierungsfehler: validationResult.errors

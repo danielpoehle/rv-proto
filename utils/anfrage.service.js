@@ -12,6 +12,12 @@ const { UTCDate } = require('@date-fns/utc');
 const GLOBAL_KW1_START_DATE_ISO = "2024-12-30T00:00:00.000Z";
 const GLOBAL_KW1_START_DATE = startOfWeek(parseISO(GLOBAL_KW1_START_DATE_ISO), { weekStartsOn: 1 });
 
+// Hilfsfunktion: Konvertiert {stunde, minute} zu Minuten seit Mitternacht
+// dayOffset: Anzahl Stunden wegen Tageswechsel
+const timeToMinutes = (timeObj, dayOffset) => {
+    (timeObj.stunde + dayOffset) * 60 + timeObj.minute;
+}
+
 function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
     if (stunde === undefined || stunde === null || stunde < 0 || stunde > 23) return null;
 
@@ -28,6 +34,36 @@ function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
     if (stunde >= 1 && stunde <= 2) return '01-03';
     if (stunde >= 3 && stunde <= 4) return '03-05';
     return null; // Sollte nicht erreicht werden bei validen Stunden 0-23
+}
+
+function generateOffset(ListeGewuenschterSlotAbschnitte) {
+    let dayOffset = 0;
+    for (let i = 0; i < ListeGewuenschterSlotAbschnitte.length; i++) {
+        const currentSegment = ListeGewuenschterSlotAbschnitte[i];
+        const nextSegment = ListeGewuenschterSlotAbschnitte[i + 1]; 
+
+        //Wenn (mehrfacher) Tageswechsel detektiert wurde, dann speichern wir das Offset
+        ListeGewuenschterSlotAbschnitte[i].dayOffset = dayOffset;
+
+        const abfahrtAktuellMinuten = timeToMinutes(currentSegment.Abfahrtszeit, dayOffset);
+        const ankunftAktuellMinuten = timeToMinutes(currentSegment.Ankunftszeit, dayOffset);
+
+        if (ankunftAktuellMinuten < abfahrtAktuellMinuten) {
+            dayOffset += 24;
+            //Tageswechsel detektiert            
+        } 
+        
+        if (nextSegment) {
+            const abfahrtNaechsterMinuten = timeToMinutes(nextSegment.Abfahrtszeit, dayOffset);
+
+                if(abfahrtNaechsterMinuten < ankunftAktuellMinuten){
+                    dayOffset += 24;
+                    //Tageswechsel detektiert 
+                }
+        }
+    }
+
+    return ListeGewuenschterSlotAbschnitte;
 }
 
 function berechneFahrzeit(gewuenschterAbschnitt){
@@ -106,6 +142,8 @@ async function calculateAnfrageEntgelt(anfrage, zugewieseneSlotsPopulated) {
         return 0;
     }
 
+    //console.log(`gesamtBetriebstageAnfrage ${gesamtBetriebstageAnfrage}`);
+
     let summeGrundentgelteProDurchlauf = 0;
 
     //console.log(anfrage);
@@ -173,7 +211,14 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
         
     if (anfrage.Status !== 'validiert') { throw new Error(`Anfrage ${anfrage.AnfrageID_Sprechend || anfrageId} hat nicht den Status 'validiert' (aktueller Status: ${anfrage.Status}).`); }
 
-    const { ListeGewuenschterSlotAbschnitte, Verkehrsart: anfrageVerkehrsart, Verkehrstag: anfrageVerkehrstagGruppe, Zeitraum } = anfrage;
+    const { Verkehrsart: anfrageVerkehrsart, Verkehrstag: anfrageVerkehrstagGruppe, Zeitraum } = anfrage;
+    let { ListeGewuenschterSlotAbschnitte } = anfrage;    
+
+    //Falls die SlotAbschnitte noch keine Prüfung auf Tageswechsel durchlaufen haben, wird dayOffset ergänzt
+    //console.log(ListeGewuenschterSlotAbschnitte);
+    if(!(ListeGewuenschterSlotAbschnitte[0].dayOffset === 0)){
+        ListeGewuenschterSlotAbschnitte = generateOffset(ListeGewuenschterSlotAbschnitte);
+    }
         
     const anfrageStartDatum = parseISO(Zeitraum.start.toISOString()); // Sicherstellen, dass es Date-Objekte sind
     const anfrageEndDatum = parseISO(Zeitraum.ende.toISOString());
@@ -181,7 +226,7 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
     const relevanteGlobalRelativeKWs = []; // Array für Nummern der KWs
     const startRelKW = getGlobalRelativeKW(anfrageStartDatum);
     const endRelKW = getGlobalRelativeKW(anfrageEndDatum);
-    //console.log(`Relative Wochen von ${startRelKW} bis ${endRelKW}`);
+    //console.log(`Relative Wochen von ${Zeitraum.start.toISOString()} -> ${anfrageStartDatum.toISOString()} in KW${startRelKW} bis ${Zeitraum.ende.toISOString()} -> ${anfrageEndDatum.toISOString()} in KW${endRelKW}`);
 
     if (startRelKW === null || endRelKW === null || startRelKW > endRelKW) {
         anfrage.Status = 'zuordnung_fehlgeschlagen';
@@ -214,6 +259,19 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                 //console.log(`${gewuenschterAbschnitt}, ${anfrageVerkehrsart}, KW ${globRelKW}, VT ${slotVerkehrstag}`);
                 const istNachtSuche = nachtStunden.has(gewuenschterAbschnitt.Abfahrtszeit.stunde);
                 let matchingSlots = [];
+                let nightOverlapSlots = [];
+
+                // Zusätzlich zum Tages- bzw. Nacht-Slot muss bei Tageswechsel am Morgen (Abfahrt.stunde === 0) der 
+                // Slot des Vortages für den alternierenden Verkehrstag und am Abend (Abfahrt.stunde >== 1 und dayOffset > 0)
+                // der Slot des Folgetages für den alternierenden Verkehrstag mit belegt werden
+                // Zusätzlich muss bei Tageswechsel am Morgen bei Mo-Fr der Sa+So der Vorwoche belegt werden
+                // Bei Tageswechsel am Abend bei Sa+So muss der Mo-Fr der Folgewoche belegt werden
+                // Bedeutet konkret bei VT Mo-Fr: 
+                // ------------ ist Abfahrt.stunde === 0 und dayOffset === 0 wird zusätzlich Sa+So in globRelKW-1 belegt
+                // ------------ ist Abfahrt.stunde >== 1 und dayOffset >   0 wird zusätzlich Sa+So in globRelKW belegt
+                // Bedeutet konkret bei VT Sa+So:
+                // ------------ ist Abfahrt.stunde === 0 und dayOffset === 0 wird zusätzlich Mo-Fr in globRelKW belegt
+                // ------------ ist Abfahrt.stunde >== 1 und dayOffset >   0 wird zusätzlich Mo-Fr in globRelKW+1 belegt
 
                 if(istNachtSuche){
                     matchingSlots = await NachtSlot.find({
@@ -223,7 +281,47 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                     Verkehrsart: 'ALLE',
                     Kalenderwoche: globRelKW,
                     Verkehrstag: slotVerkehrstag
-                }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs holen für die erste Sammlung
+                    }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs und Fahrzeitspanne
+                    if(slotVerkehrstag === 'Mo-Fr' && gewuenschterAbschnitt.Abfahrtszeit.stunde === 0 && gewuenschterAbschnitt.dayOffset === 0){
+                        nightOverlapSlots = await NachtSlot.find({
+                        von: gewuenschterAbschnitt.von,
+                        bis: gewuenschterAbschnitt.bis,
+                        Zeitfenster: mapAbfahrtstundeToKapazitaetstopfZeitfenster(gewuenschterAbschnitt.Abfahrtszeit.stunde),
+                        Verkehrsart: 'ALLE',
+                        Kalenderwoche: globRelKW-1,
+                        Verkehrstag: 'Sa+So'
+                        }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs und Fahrzeitspanne
+                    }
+                    if(slotVerkehrstag === 'Mo-Fr' && gewuenschterAbschnitt.Abfahrtszeit.stunde > 0 && gewuenschterAbschnitt.dayOffset > 0){
+                        nightOverlapSlots = await NachtSlot.find({
+                        von: gewuenschterAbschnitt.von,
+                        bis: gewuenschterAbschnitt.bis,
+                        Zeitfenster: mapAbfahrtstundeToKapazitaetstopfZeitfenster(gewuenschterAbschnitt.Abfahrtszeit.stunde),
+                        Verkehrsart: 'ALLE',
+                        Kalenderwoche: globRelKW,
+                        Verkehrstag: 'Sa+So'
+                        }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs und Fahrzeitspanne
+                    }
+                    if(slotVerkehrstag === 'Sa+So' && gewuenschterAbschnitt.Abfahrtszeit.stunde === 0 && gewuenschterAbschnitt.dayOffset === 0){
+                        nightOverlapSlots = await NachtSlot.find({
+                        von: gewuenschterAbschnitt.von,
+                        bis: gewuenschterAbschnitt.bis,
+                        Zeitfenster: mapAbfahrtstundeToKapazitaetstopfZeitfenster(gewuenschterAbschnitt.Abfahrtszeit.stunde),
+                        Verkehrsart: 'ALLE',
+                        Kalenderwoche: globRelKW,
+                        Verkehrstag: 'Mo-Fr'
+                        }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs und Fahrzeitspanne
+                    }
+                    if(slotVerkehrstag === 'Sa+So' && gewuenschterAbschnitt.Abfahrtszeit.stunde > 0 && gewuenschterAbschnitt.dayOffset > 0){
+                        nightOverlapSlots = await NachtSlot.find({
+                        von: gewuenschterAbschnitt.von,
+                        bis: gewuenschterAbschnitt.bis,
+                        Zeitfenster: mapAbfahrtstundeToKapazitaetstopfZeitfenster(gewuenschterAbschnitt.Abfahrtszeit.stunde),
+                        Verkehrsart: 'ALLE',
+                        Kalenderwoche: globRelKW+1,
+                        Verkehrstag: 'Mo-Fr'
+                        }).select('_id Mindestfahrzeit Maximalfahrzeit'); // Nur die IDs und Fahrzeitspanne
+                    }
                 }else {
                     matchingSlots = await TagesSlot.find({
                     von: gewuenschterAbschnitt.von,
@@ -235,7 +333,33 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                     Verkehrsart: anfrageVerkehrsart,
                     Kalenderwoche: globRelKW,
                     Verkehrstag: slotVerkehrstag
-                }).select('_id'); // Nur die IDs holen für die erste Sammlung
+                    }).select('_id'); // Nur die IDs holen für die erste Sammlung
+                    if(slotVerkehrstag === 'Mo-Fr' && gewuenschterAbschnitt.Abfahrtszeit.stunde > 4 && gewuenschterAbschnitt.dayOffset > 0){
+                        nightOverlapSlots = await TagesSlot.find({
+                        von: gewuenschterAbschnitt.von,
+                        bis: gewuenschterAbschnitt.bis,
+                        'Abfahrt.stunde': gewuenschterAbschnitt.Abfahrtszeit.stunde,
+                        'Abfahrt.minute': gewuenschterAbschnitt.Abfahrtszeit.minute,
+                        'Ankunft.stunde': gewuenschterAbschnitt.Ankunftszeit.stunde,
+                        'Ankunft.minute': gewuenschterAbschnitt.Ankunftszeit.minute,
+                        Verkehrsart: anfrageVerkehrsart,
+                        Kalenderwoche: globRelKW,
+                        Verkehrstag: 'Sa+So'
+                        }).select('_id'); // Nur die IDs holen für die erste Sammlung
+                    }
+                    if(slotVerkehrstag === 'Sa+So' && gewuenschterAbschnitt.Abfahrtszeit.stunde > 4 && gewuenschterAbschnitt.dayOffset > 0){
+                        nightOverlapSlots = await TagesSlot.find({
+                        von: gewuenschterAbschnitt.von,
+                        bis: gewuenschterAbschnitt.bis,
+                        'Abfahrt.stunde': gewuenschterAbschnitt.Abfahrtszeit.stunde,
+                        'Abfahrt.minute': gewuenschterAbschnitt.Abfahrtszeit.minute,
+                        'Ankunft.stunde': gewuenschterAbschnitt.Ankunftszeit.stunde,
+                        'Ankunft.minute': gewuenschterAbschnitt.Ankunftszeit.minute,
+                        Verkehrsart: anfrageVerkehrsart,
+                        Kalenderwoche: globRelKW+1,
+                        Verkehrstag: 'Mo-Fr'
+                        }).select('_id'); // Nur die IDs holen für die erste Sammlung
+                    }
                 }
 
                 if (matchingSlots.length > 0) {
@@ -244,8 +368,7 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                         const wunschfahrzeit = berechneFahrzeit(gewuenschterAbschnitt); 
 
                         const ersterPassenderNachtSlot = matchingSlots.find(slot =>
-                            wunschfahrzeit >= slot.Mindestfahrzeit && wunschfahrzeit <= slot.Maximalfahrzeit
-                        );
+                            wunschfahrzeit >= slot.Mindestfahrzeit && wunschfahrzeit <= slot.Maximalfahrzeit);
 
                         if (ersterPassenderNachtSlot) {
                             // Es wurde ein passender Nacht-Slot gefunden
@@ -258,10 +381,25 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                             // In diesem Fall wird `patternFuerDiesenAbschnittMindestensEinmalGefunden` nicht `true` gesetzt,
                             // was dazu führt, dass die Anfrage später als 'zuordnung_fehlgeschlagen' markiert wird.
                         }
+                        if(nightOverlapSlots.length > 0){
+                            const ersterPassenderOverlapSlot = nightOverlapSlots.find(slot =>
+                            wunschfahrzeit >= slot.Mindestfahrzeit && wunschfahrzeit <= slot.Maximalfahrzeit);
+                            if(ersterPassenderOverlapSlot){
+                                // Es wurde ein passender Nacht-Slot gefunden
+                                zuzuweisendeSlotIdsSet.add(ersterPassenderOverlapSlot._id.toString());
+                            }else {
+                                // Es wurden zwar Nacht-Slots für das Zeitfenster gefunden,
+                                // aber bei keinem passte die Fahrzeit.
+                                anfrage.Validierungsfehler.push(`Für den Abschnitt ${gewuenschterAbschnitt.von} -> ${gewuenschterAbschnitt.bis} liegt die gewünschte Fahrzeit für den Slot im Nachtsprung (Nacht) nicht im zulässigen Bereich der verfügbaren Slots.`);
+                            }
+                        }
                     } else {
                         // Bei Tages-Slots: Nimm einfach den ERSTEN gefundenen Slot.
                         patternFuerDiesenAbschnittMindestensEinmalGefunden = true;
                         zuzuweisendeSlotIdsSet.add(matchingSlots[0]._id.toString());
+                        if(nightOverlapSlots.length > 0){
+                            zuzuweisendeSlotIdsSet.add(nightOverlapSlots[0]._id.toString());
+                        }
                     }
                 }                
             }
@@ -311,7 +449,7 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
         anfrage.Entgelt = 0;
         // Wenn keine Slots zugewiesen werden konnten, wurde der Status schon oben auf 'zuordnung_fehlgeschlagen' gesetzt.
     }
-    console.log(`Entgelt für Anfrage ${anfrage.AnfrageID_Sprechend || anfrage._id} berechnet: ${anfrage.Entgelt}`);
+    //console.log(`Entgelt für Anfrage ${anfrage.AnfrageID_Sprechend || anfrage._id} berechnet: ${anfrage.Entgelt}`);
         
     const gespeicherteAnfrage = await anfrage.save(); // Speichert Anfrage mit Entgelt und neuer Struktur von ZugewieseneSlots
 
@@ -338,10 +476,11 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
                 { _id: { $in: Array.from(betroffeneTopfIds).map(id => new mongoose.Types.ObjectId(id)) } },
                 { $addToSet: { ListeDerAnfragen: gespeicherteAnfrage._id } }
             );
-            console.log(`Kapazitätstöpfe [${Array.from(betroffeneTopfIds).join(', ')}] mit Anfrage ${gespeicherteAnfrage.AnfrageID_Sprechend || gespeicherteAnfrage._id} aktualisiert.`);
+            //console.log(`Kapazitätstöpfe [${Array.from(betroffeneTopfIds).join(', ')}] mit Anfrage ${gespeicherteAnfrage.AnfrageID_Sprechend || gespeicherteAnfrage._id} aktualisiert.`);
         }
     }
 
+    console.log(`Anfrage ${gespeicherteAnfrage.AnfrageID_Sprechend || gespeicherteAnfrage._id} zugeordnet und in Datenbank aktualisiert`)
     return gespeicherteAnfrage;
 }
 
