@@ -15,7 +15,7 @@ const GLOBAL_KW1_START_DATE = startOfWeek(parseISO(GLOBAL_KW1_START_DATE_ISO), {
 // Hilfsfunktion: Konvertiert {stunde, minute} zu Minuten seit Mitternacht
 // dayOffset: Anzahl Stunden wegen Tageswechsel
 const timeToMinutes = (timeObj, dayOffset) => {
-    (timeObj.stunde + dayOffset) * 60 + timeObj.minute;
+    return((timeObj.stunde + dayOffset) * 60 + timeObj.minute);
 }
 
 function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
@@ -44,20 +44,26 @@ function generateOffset(ListeGewuenschterSlotAbschnitte) {
 
         //Wenn (mehrfacher) Tageswechsel detektiert wurde, dann speichern wir das Offset
         ListeGewuenschterSlotAbschnitte[i].dayOffset = dayOffset;
+        //console.log(`i ${i} dayoffset ${dayOffset}`);
 
         const abfahrtAktuellMinuten = timeToMinutes(currentSegment.Abfahrtszeit, dayOffset);
         const ankunftAktuellMinuten = timeToMinutes(currentSegment.Ankunftszeit, dayOffset);
 
+        //console.log(`current segment abfahrtAktuellMinuten ${abfahrtAktuellMinuten} ankunftAktuellMinuten ${ankunftAktuellMinuten}`);
+
         if (ankunftAktuellMinuten < abfahrtAktuellMinuten) {
             dayOffset += 24;
-            //Tageswechsel detektiert            
+            //Tageswechsel detektiert  
+            //console.log("Tageswechsel im aktuellen Segment detektiert.");        
         } 
         
         if (nextSegment) {
             const abfahrtNaechsterMinuten = timeToMinutes(nextSegment.Abfahrtszeit, dayOffset);
+            //console.log(`to next segment ankunftAktuellMinuten ${ankunftAktuellMinuten} abfahrtNaechsterMinuten ${abfahrtNaechsterMinuten}`);
 
                 if(abfahrtNaechsterMinuten < ankunftAktuellMinuten){
                     dayOffset += 24;
+                    //console.log("Tageswechsel zum nachfolgenden Segment detektiert."); 
                     //Tageswechsel detektiert 
                 }
         }
@@ -216,9 +222,8 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
 
     //Falls die SlotAbschnitte noch keine Prüfung auf Tageswechsel durchlaufen haben, wird dayOffset ergänzt
     //console.log(ListeGewuenschterSlotAbschnitte);
-    if(!(ListeGewuenschterSlotAbschnitte[0].dayOffset === 0)){
-        ListeGewuenschterSlotAbschnitte = generateOffset(ListeGewuenschterSlotAbschnitte);
-    }
+    ListeGewuenschterSlotAbschnitte = generateOffset(ListeGewuenschterSlotAbschnitte);
+    //console.log(ListeGewuenschterSlotAbschnitte);
         
     const anfrageStartDatum = parseISO(Zeitraum.start.toISOString()); // Sicherstellen, dass es Date-Objekte sind
     const anfrageEndDatum = parseISO(Zeitraum.ende.toISOString());

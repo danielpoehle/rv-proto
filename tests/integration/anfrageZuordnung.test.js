@@ -1378,7 +1378,7 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         expect(ktSaSoKW3_Id2).toBeDefined();
         expect(ktMoFrKW3_Id3).toBeDefined(); 
         expect(ktSaSoKW3_Id3).toBeDefined();
-        // Sicherstellen, dass es vier unterschiedliche Töpfe sind (aufgrund KW und Verkehrstag)
+        // Sicherstellen, dass es 18 unterschiedliche Töpfe sind (aufgrund KW und Verkehrstag)
         const topfIds = new Set([ktMoFrKW1_Id1, ktSaSoKW1_Id1, ktMoFrKW2_Id1, ktSaSoKW2_Id1, ktMoFrKW3_Id1, ktSaSoKW3_Id1,
                                  ktMoFrKW1_Id2, ktSaSoKW1_Id2, ktMoFrKW2_Id2, ktSaSoKW2_Id2, ktMoFrKW3_Id2, ktSaSoKW3_Id2,
                                  ktMoFrKW1_Id3, ktSaSoKW1_Id3, ktMoFrKW2_Id3, ktSaSoKW2_Id3, ktMoFrKW3_Id3, ktSaSoKW3_Id3,
@@ -2186,6 +2186,217 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         expect(anfrageErstellt.Entgelt).toBe(erwartetesEntgelt);
         expect(anfrageErstellt2.Entgelt).toBe(erwartetesEntgelt);
         expect(anfrageErstellt3.Entgelt).toBe(erwartetesEntgelt2);
+    });
+
+    it('Szenario C_Erweitert: Anfrage MoFr über Nacht auf  Abschnitten in 1 KW soll auf 2 Kapazitaetstoepfe MoFr und SauSo gemappt werden', async () => {
+        // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
+        // Wir brauchen den Topf Mo-Fr für KW 28-30, da durch den Tageswechsel am Morgen der zweite Slot am Mo-Fr 
+        // auch in die Sa+So-Topf der gleichen KW geht. Die anderen 
+        // Töpfe bleiben ohne Belegung
+        const commonSlotParams1 = {
+            slotTyp: 'TAG',
+            von: "A", bis: "B", Abschnitt: "Strecke1",
+            Abfahrt: { stunde: 22, minute: 31 }, Ankunft: { stunde: 23, minute: 48 },
+            Verkehrsart: "SGV", Grundentgelt: 150
+        };
+
+        const commonSlotParams2 = {
+            slotTyp: 'NACHT',
+            von: "B", bis: "C", Abschnitt: "Strecke2",
+            Zeitfenster: '23-01',
+            Mindestfahrzeit: 60,
+            Maximalfahrzeit: 90,
+            Grundentgelt: 150
+        };
+
+        // Slots für KW28 (global relativ)
+        const slotMoFrKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 28, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 28, Verkehrstag: "Sa+So" };
+        const slotMoFrKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 28, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 28, Verkehrstag: "Sa+So" };
+
+        // Slots für KW29 (global relativ)
+        const slotMoFrKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 29, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 29, Verkehrstag: "Sa+So" };
+        const slotMoFrKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 29, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 29, Verkehrstag: "Sa+So" };
+
+        // Slots für KW30 (global relativ)
+        const slotMoFrKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 30, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 30, Verkehrstag: "Sa+So" };
+        const slotMoFrKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 30, Verkehrstag: "Mo-Fr" };
+        const slotSaSoKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 30, Verkehrstag: "Sa+So" };
+
+        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data1);
+        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data1);
+        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data1);
+        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data1);
+        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW1Data2);
+        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW1Data2);
+        const respSlot7 = await request(app).post('/api/slots').send(slotMoFrKW2Data2);
+        const respSlot8 = await request(app).post('/api/slots').send(slotSaSoKW2Data2);
+        const respSlot9 = await request(app).post('/api/slots').send(slotMoFrKW3Data1);
+        const respSlot10 = await request(app).post('/api/slots').send(slotSaSoKW3Data1);
+        const respSlot11 = await request(app).post('/api/slots').send(slotMoFrKW3Data2);
+        const respSlot12 = await request(app).post('/api/slots').send(slotSaSoKW3Data2);
+
+        expect(respSlot1.status).toBe(201); 
+        expect(respSlot2.status).toBe(201);
+        expect(respSlot3.status).toBe(201); 
+        expect(respSlot4.status).toBe(201);
+        expect(respSlot5.status).toBe(201); 
+        expect(respSlot6.status).toBe(201);
+        expect(respSlot7.status).toBe(201); 
+        expect(respSlot8.status).toBe(201);
+        expect(respSlot9.status).toBe(201); 
+        expect(respSlot10.status).toBe(201);
+        expect(respSlot11.status).toBe(201); 
+        expect(respSlot12.status).toBe(201);
+
+        
+        const slotMoFrKW1_1 = respSlot1.body.data;
+        const slotSaSoKW1_1 = respSlot2.body.data;
+        const slotMoFrKW2_1 = respSlot3.body.data;
+        const slotSaSoKW2_1 = respSlot4.body.data;
+        const slotMoFrKW1_2 = respSlot5.body.data;
+        const slotSaSoKW1_2 = respSlot6.body.data;
+        const slotMoFrKW2_2 = respSlot7.body.data;
+        const slotSaSoKW2_2 = respSlot8.body.data;
+        const slotMoFrKW3_1 = respSlot9.body.data;
+        const slotSaSoKW3_1 = respSlot10.body.data;
+        const slotMoFrKW3_2 = respSlot11.body.data;
+        const slotSaSoKW3_2 = respSlot12.body.data;
+
+        // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
+        const ktMoFrKW1_Id1 = slotMoFrKW1_1.VerweisAufTopf;
+        const ktSaSoKW1_Id1 = slotSaSoKW1_1.VerweisAufTopf;
+        const ktMoFrKW2_Id1 = slotMoFrKW2_1.VerweisAufTopf;
+        const ktSaSoKW2_Id1 = slotSaSoKW2_1.VerweisAufTopf;
+        const ktMoFrKW1_Id2 = slotMoFrKW1_2.VerweisAufTopf;
+        const ktSaSoKW1_Id2 = slotSaSoKW1_2.VerweisAufTopf;
+        const ktMoFrKW2_Id2 = slotMoFrKW2_2.VerweisAufTopf;
+        const ktSaSoKW2_Id2 = slotSaSoKW2_2.VerweisAufTopf;
+        const ktMoFrKW3_Id1 = slotMoFrKW3_1.VerweisAufTopf;
+        const ktSaSoKW3_Id1 = slotSaSoKW3_1.VerweisAufTopf;
+        const ktMoFrKW3_Id2 = slotMoFrKW3_2.VerweisAufTopf;
+        const ktSaSoKW3_Id2 = slotSaSoKW3_2.VerweisAufTopf;
+
+        expect(ktMoFrKW1_Id1).toBeDefined(); 
+        expect(ktSaSoKW1_Id1).toBeDefined();
+        expect(ktMoFrKW2_Id1).toBeDefined(); 
+        expect(ktSaSoKW2_Id1).toBeDefined();
+        expect(ktMoFrKW1_Id2).toBeDefined(); 
+        expect(ktSaSoKW1_Id2).toBeDefined();
+        expect(ktMoFrKW2_Id2).toBeDefined(); 
+        expect(ktSaSoKW2_Id2).toBeDefined();
+        expect(ktMoFrKW3_Id1).toBeDefined(); 
+        expect(ktSaSoKW3_Id1).toBeDefined();
+        expect(ktMoFrKW3_Id2).toBeDefined(); 
+        expect(ktSaSoKW3_Id2).toBeDefined();
+
+
+        // Sicherstellen, dass es 12 unterschiedliche Töpfe sind (aufgrund KW und Verkehrstag)
+        const topfIds = new Set([ktMoFrKW1_Id1, ktSaSoKW1_Id1, ktMoFrKW2_Id1, ktSaSoKW2_Id1, ktMoFrKW3_Id1, ktSaSoKW3_Id1,
+                                 ktMoFrKW1_Id2, ktSaSoKW1_Id2, ktMoFrKW2_Id2, ktSaSoKW2_Id2, ktMoFrKW3_Id2, ktSaSoKW3_Id2,
+                                ]);
+        expect(topfIds.size).toBe(12);
+
+
+        // ----- 2. Anfrage erstellen -----
+        const anfrageData = {
+            Zugnummer: "55678", EVU: "TX",
+            ListeGewuenschterSlotAbschnitte: [
+                { von: "A", bis: "B", Abfahrtszeit: { stunde: 22, minute: 31 }, Ankunftszeit: { stunde: 23, minute: 48 } },
+                { von: "B", bis: "C", Abfahrtszeit: { stunde: 0, minute: 3 }, Ankunftszeit: { stunde: 1, minute: 13 } }
+            ],
+            Verkehrsart: "SGV",
+            Verkehrstag: "Mo-Fr",
+            Zeitraum: {
+                start: "2025-07-14", // Mo, 14.07.25 (Start KW29)
+                ende: "2025-07-20" // So, 20.07.2025 (Ende KW29)
+            },
+            Email: "test2@example.com",
+            Status: "validiert",
+            //ZugewieseneSlots: [], //hier muss noch alle Slot-IDs in das Feld ZugewieseneSlots hinterlegt werden
+            //Entgelt: 4200
+        };
+        const anfrageErstelltResponse = await request(app).post('/api/anfragen').send(anfrageData);
+        expect(anfrageErstelltResponse.status).toBe(201); // Annahme: POST /api/anfragen gibt 201 bei Erfolg
+        let anfrageErstellt = anfrageErstelltResponse.body.data;
+        anfrageErstellt = await Anfrage.findById(anfrageErstellt._id);
+        //console.log(anfrageErstellt);
+        anfrageErstellt.Status = 'validiert';
+        await anfrageErstellt.save();
+        expect(anfrageErstellt.Status).toBe("validiert");
+
+        // ----- 3. Aktion: Zuordnungsprozess anstoßen -----
+        const zuordnenResponse = await request(app)
+            .post(`/api/anfragen/${anfrageErstellt._id}/zuordnen`)
+            .send();
+
+        expect(zuordnenResponse.status).toBe(200);
+        const aktualisierteAnfrage = zuordnenResponse.body.data;
+        expect(aktualisierteAnfrage.Status).toBe("in_konfliktpruefung");
+
+        const anfrage_final = await Anfrage.findById(aktualisierteAnfrage._id);
+
+        // ----- 4. Überprüfung -----
+        // 4.1 Zugewiesene Slots in der Anfrage
+        expect(anfrage_final.ZugewieseneSlots).toHaveLength(2);
+        
+        expect(anfrage_final.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+        expect(anfrage_final.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
+
+        // Prüfung für Abschnitt 2 im Tageswechsel
+        // Die Anfrage sollte im Topf Mo-Fr der KW 29 sein 
+        // Die Anfrage sollte NICHT im Topf Sa+So der KW 29, da die Abfahrt 0.03 zwar kalendarisch am Sa ist aber im Fr-Topf 23-01
+        // Die Anfrage sollte nicht im Topf Mo-Fr der KW 28 und 30 sein
+        // Die Anfrage sollte nicht im Topf Sa+So der KW 28 ud 30 sein
+
+
+        const kt_ab2_mofr_kw28 = await Kapazitaetstopf.findById(ktMoFrKW1_Id2);
+        const kt_ab2_saso_kw28 = await Kapazitaetstopf.findById(ktSaSoKW1_Id2);
+        const kt_ab2_mofr_kw29 = await Kapazitaetstopf.findById(ktMoFrKW2_Id2);
+        const kt_ab2_saso_kw29 = await Kapazitaetstopf.findById(ktSaSoKW2_Id2);
+        const kt_ab2_mofr_kw30 = await Kapazitaetstopf.findById(ktMoFrKW3_Id2);
+        const kt_ab2_saso_kw30 = await Kapazitaetstopf.findById(ktSaSoKW3_Id2);
+
+        expect(kt_ab2_mofr_kw28.Kalenderwoche).toBe(28);
+        expect(kt_ab2_mofr_kw28.Verkehrstag).toBe('Mo-Fr');
+        expect(kt_ab2_mofr_kw28.ListeDerAnfragen.length).toBe(0);
+
+        expect(kt_ab2_saso_kw28.Kalenderwoche).toBe(28);
+        expect(kt_ab2_saso_kw28.Verkehrstag).toBe('Sa+So');
+        expect(kt_ab2_saso_kw28.ListeDerAnfragen.length).toBe(0);
+
+        expect(kt_ab2_mofr_kw29.Kalenderwoche).toBe(29);
+        expect(kt_ab2_mofr_kw29.Verkehrstag).toBe('Mo-Fr');
+        expect(kt_ab2_mofr_kw29.ListeDerAnfragen.length).toBe(1);
+
+        expect(kt_ab2_saso_kw29.Kalenderwoche).toBe(29);
+        expect(kt_ab2_saso_kw29.Verkehrstag).toBe('Sa+So');
+        expect(kt_ab2_saso_kw29.ListeDerAnfragen.length).toBe(0);
+
+        expect(kt_ab2_mofr_kw30.Kalenderwoche).toBe(30);
+        expect(kt_ab2_mofr_kw30.Verkehrstag).toBe('Mo-Fr');
+        expect(kt_ab2_mofr_kw30.ListeDerAnfragen.length).toBe(0);
+
+        expect(kt_ab2_saso_kw30.Kalenderwoche).toBe(30);
+        expect(kt_ab2_saso_kw30.Verkehrstag).toBe('Sa+So');
+        expect(kt_ab2_saso_kw30.ListeDerAnfragen.length).toBe(0);
+
+        
+
+        
+
+        // WICHTIG: Teste auch das berechnete Entgelt
+        // Annahme: Alle 3 genutzten Slot-Muster haben Grundentgelt 150.
+        // Die Anfrage läuft über 1 volle KWs "Mo-Fr", also 5 Tage.
+        // Jeder der ZWEI Abschnitte der Anfrage wird an diesen 5 Tagen befahren.
+        // Pro Tag kostet ein Abschnitt 150€. Summe pro Durchlauf = 150€ (Abschnitt1) + 150€ (Abschnitt2) = 300€.
+        // Gesamtentgelt = 5 Tage * 300€/Tag = 1500.
+        const erwartetesEntgelt = 5 * (150 + 150); // 5 Tage * (Grundentgelt SlotTyp1 + Grundentgelt SlotTyp2)
+        expect(aktualisierteAnfrage.Entgelt).toBe(erwartetesEntgelt);
     });
 });
 

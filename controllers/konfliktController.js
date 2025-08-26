@@ -82,6 +82,11 @@ function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloes
         for (const zuweisung of anfrageDoc.ZugewieseneSlots) {
             // Prüfe, ob der Slot in der Zuweisung zum aktuellen auslösenden Topf gehört
             if (zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(ausloesenderTopfObjectId)) {
+                
+                if(neuerEinzelStatus === 'wartet_konflikt_topf'){
+                    zuweisung.finaleTopfStatus = 'entscheidung_ausstehend';
+                    anfrageModifiziert = true;
+                }
                 if (zuweisung.statusEinzelzuweisung !== neuerEinzelStatus) {
                     zuweisung.statusEinzelzuweisung = neuerEinzelStatus;
                     anfrageModifiziert = true;
@@ -995,6 +1000,7 @@ exports.identifiziereTopfKonflikte = async (req, res) => {
                         // Alle Anfragen in diesem überbuchten Topf erhalten für die relevanten Slots den Status 'wartet_konflikt_topf'
                         for (const anfrage of topf.ListeDerAnfragen) {
                             await updateAnfrageSlotsStatusFuerTopf(anfrage, 'wartet_konflikt_topf', topf._id, konfliktDoku._id);
+                            //finaler Topf-Status auch zurücksetzen
                             anfragenToSave.set(anfrage._id.toString(), anfrage);
                         }
                     } else { // Anfragen im Topf sind unverändert und er ist auch noch nicht gelöst, alles bleibt so wie es ist

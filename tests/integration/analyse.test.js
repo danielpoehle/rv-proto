@@ -12,7 +12,7 @@ const { parseISO, addDays } = require('date-fns');
 // Annahme: Globale Konstanten und Helfer sind verfügbar
 const GLOBAL_KW1_START_DATE_ISO = "2024-12-30T00:00:00.000Z";
 
-describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse', () => {
+describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse Tag', () => {
     let konfliktGruppe = [];
     jest.setTimeout(60000);
 
@@ -106,7 +106,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         console.log("TEST SETUP: Konflikterkennung abgeschlossen.");
 
         konfliktGruppe = await KonfliktGruppe.find({});
-        console.log(konfliktGruppe);
+        //console.log(konfliktGruppe);
     });
     
     it('sollte für eine Konfliktgruppe die korrekten, freien Alternativ-Slots für jede Anfrage zurückgeben', async () => {
@@ -220,3 +220,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse'
         expect(topf_1113.freieSlots[2].Abfahrt.minute).toBe(40); 
     });
 });
+
+// Für die Nacht ist die Analyse freier Slots auf dem Laufweg nicht sinnvoll, da es keine Slot-Konflikte gibt. 
+// Hier müssen nur die benachbarten freien Töpfe analysiert werden.
+
