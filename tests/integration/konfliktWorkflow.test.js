@@ -871,6 +871,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte NACHT', () => {
         });
     });
 
+
 describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automatische Zuweisung bei ausreichendem Verzicht', () => {
     
     let kt_AutoResolve, anfrage1, anfrage2, anfrage3, anfrage4, konfliktDoku;
