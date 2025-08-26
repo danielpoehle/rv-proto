@@ -1182,6 +1182,8 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 continue;
             }
 
+            
+
             // 3b. Ermittle "aktive" und bereits entschiedenen Anfragen für DIESEN Slot --> Zählung für die Konfliktbeteiligung
             const aktiveUndEntschiedeneAnfragenFuerSlot = slot.zugewieseneAnfragen.filter(anfrage => {
                 // Finde die spezifische Zuweisung dieses Slots in der Anfrage
@@ -1190,7 +1192,12 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
                 return zuweisung && aktiveUndEntschiedeneSlotKonfliktStatusse.includes(zuweisung.statusEinzelzuweisung);
             });
             
-            const maxKapazitaetSlot = 1;
+            let maxKapazitaetSlot = 1;
+            //wenn es ein Nacht-Slot ist, dann werden alle Anfragen zugewiesen, d.h. wir haben immer ausreichend Kapazität für alle Anfragen
+            if(slot.slotTyp === "NACHT"){
+                maxKapazitaetSlot = aktiveAnfragenFuerSlot.length + 1;
+            }
+
             const istUeberbucht = aktiveAnfragenFuerSlot.length > maxKapazitaetSlot;
 
             if (istUeberbucht) {

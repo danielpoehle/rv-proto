@@ -3119,3 +3119,250 @@ describe('Konfliktgruppen-Status-Synchronisation Topf-Konflikte - Konflikt in de
             expect(anfrage_H3.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
         });
 });
+
+describe('Konfliktgruppen-Status-Synchronisation (Slot-Konflikte) bei Nacht-Slots', () => {
+        beforeAll(async () => {
+            // Mongoose Verbindung herstellen, wenn nicht schon global geschehen
+            // Diese Verbindung muss die URI zur Docker-DB nutzen
+            await mongoose.connect(process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots');
+        });
+    
+        afterAll(async () => {
+            await mongoose.disconnect();
+        });
+
+        beforeEach(async () => {
+            // 0. Datenbank leeren
+            if (mongoose.connection.readyState === 0) {
+                    const testDbUri = process.env.TEST_MONGO_URI || 'mongodb://localhost:27017/test-mongo-slots';
+                    await mongoose.connect(testDbUri);
+            }
+            // Leere Collections
+            const collections = mongoose.connection.collections;        
+            for (const key in collections) {
+                //console.log(key);
+                const collection = collections[key];
+                await collection.deleteMany({});
+            }
+
+            const slotData3 = {
+            slotTyp: "NACHT", von: "C", bis: "D", Abschnitt: "Strecke3", 
+            Verkehrstag: "täglich", 
+            zeitraumStart: '2025-07-07',  
+            zeitraumEnde: '2025-08-03',  
+            Grundentgelt: 100,
+            Zeitfenster: '03-05',
+            Mindestfahrzeit: 60,
+            Maximalfahrzeit: 90
+            };
+
+            const slotData4 = {
+            slotTyp: "TAG", von: "D", bis: "E", Abschnitt: "Strecke4",             
+            Verkehrstag: "täglich",       
+            zeitraumStart: '2025-07-07',  
+            zeitraumEnde: '2025-08-03',  
+            Verkehrsart: "SGV",  
+            Grundentgelt: 100
+            };
+
+             //3 Nacht-Slots auf C-D --> Kapazität von 2
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send(slotData3);
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send(slotData3);
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send(slotData3);
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            
+            // 5 Tages-Slots auf D-E --> Kapazität von 3
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send({...slotData4, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 },});
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send({...slotData4, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 },});
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send({...slotData4, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 },});
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send({...slotData4, Abfahrt: { stunde: 5, minute: 33 }, Ankunft: { stunde: 7, minute: 19 },});
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+            response = await request(app)
+                .post('/api/slots/massen-erstellung')
+                .send({...slotData4, Abfahrt: { stunde: 5, minute: 43 }, Ankunft: { stunde: 7, minute: 29 },});
+            expect(response.status).toBe(201);
+            expect(response.body.erstellteSlots).toBeDefined();
+
+            kt_all = await Kapazitaetstopf.find({});
+            expect(kt_all.length).toBe(16);
+        });
+        it('sollte den Status der Gruppe und der Anfragen auch bei mehrmaliger Konfliktanalyse der Slot-Konflikte in der Nacht korrekt beibehalten', async () => {
+            // 2 Anfragen stellen, die im Nacht-Kapazitätstopf übereinander liegen aber im Tages-Zeitraum keinen Konflikt haben
+            const anfrageBasis = { Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-07-14", ende: "2025-07-27" }, Status: 'validiert'}; // KW29+30 2025
+            
+            let anfrage_V1 = await new Anfrage({ ...anfrageBasis, EVU: "ConflictEVU1" , Zugnummer: "C1", 
+                                            ListeGewuenschterSlotAbschnitte: [ 
+                                                {von: "C", bis:"D", Abfahrtszeit: {stunde:3, minute:45 }, Ankunftszeit:{stunde:4,minute:53}},
+                                                {von: "D", bis:"E", Abfahrtszeit: {stunde:5, minute:3 }, Ankunftszeit:{stunde:6,minute:49}}
+                                            ]
+                                        }).save();
+                                    
+            let anfrage_V2 = await new Anfrage({ ...anfrageBasis, EVU: "ConflictEVU2" , Zugnummer: "C2", 
+                                            ListeGewuenschterSlotAbschnitte: [ 
+                                                {von: "C", bis:"D", Abfahrtszeit: {stunde:3, minute:40 }, Ankunftszeit:{stunde:4,minute:59}},
+                                                {von: "D", bis:"E", Abfahrtszeit: {stunde:5, minute:13 }, Ankunftszeit:{stunde:6,minute:59}}
+                                            ]
+                                        }).save();
+
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"});           
+            
+
+            await request(app).post(`/api/anfragen/${anfrage_V1._id}/zuordnen`).send();
+            await request(app).post(`/api/anfragen/${anfrage_V2._id}/zuordnen`).send();
+
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V1.Status = 'validiert'; anfrage_V1.save();
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"});
+            anfrage_V2.Status = 'validiert'; anfrage_V2.save();
+
+            // 3. Erstelle ein Konfliktdokument für die Nacht
+            let response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Es gibt keinen Topf-Konflikt, weder in der Nacht, noch am Tag
+            let anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(0);
+
+            //Prüfung Einzelstatus der Anfragen
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"}); 
+
+            expect(anfrage_V1.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_V1.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_V1.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+
+            expect(anfrage_V2.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_V2.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_V2.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+
+            //Erneute Konfliktprüfung darf keine anderes Ergebnis haben
+            response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Es gibt keinen Topf-Konflikt, weder in der Nacht, noch am Tag
+            anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(0);
+
+            //Prüfung Einzelstatus der Anfragen
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"}); 
+
+            expect(anfrage_V1.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_V1.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_V1.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+
+            expect(anfrage_V2.Status).toBe('vollstaendig_bestaetigt_topf');
+            expect(anfrage_V2.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            expect(anfrage_V2.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+
+            // Löse jetzt die Slot-Konflikte: In der Nacht werden alles Slots pauschal bestätigt --> also kein Konflikt
+            // Am Tag im Abschitt D-E gibt es keinen Slot-Konflikt
+            response = await request(app)
+                    .post('/api/konflikte/identifiziere-slot-konflikte')
+                    .send();
+
+            // Überprüfung der Antwort
+            expect(response.status).toBe(200);
+            expect(response.body.message).toBe('Konfliktdetektion für Slots abgeschlossen.');
+            expect(response.body.neuErstellteKonflikte).toHaveLength(0);
+            expect(response.body.aktualisierteUndGeoeffneteKonflikte).toHaveLength(0);
+            expect(response.body.unveraenderteBestehendeKonflikte).toHaveLength(0);
+            expect(response.body.autoGeloesteKonflikte).toHaveLength(0);
+            expect(response.body.slotsOhneKonflikt).toHaveLength(64);
+
+            //Prüfung Einzelstatus der Anfragen
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"}); 
+
+            expect(anfrage_V1.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage_V1.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage_V1.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+            expect(anfrage_V2.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage_V2.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage_V2.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+            //Erneute Konfliktprüfung darf keine anderes Ergebnis haben
+            response = await request(app)
+                .post('/api/konflikte/identifiziere-topf-konflikte')
+                .send();
+            
+            // ---- ÜBERPRÜFUNG ----
+            expect(response.status).toBe(200);
+
+            // Es gibt keinen Topf-Konflikt, weder in der Nacht, noch am Tag
+            anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(0);
+
+            //Prüfung Einzelstatus der Anfragen
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"}); 
+
+            expect(anfrage_V1.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage_V1.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage_V1.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+            expect(anfrage_V2.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage_V2.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage_V2.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+            // Erneute Konfliktprüfung darf keine anderes Ergebnis haben
+            response = await request(app)
+                    .post('/api/konflikte/identifiziere-slot-konflikte')
+                    .send();
+
+            // Überprüfung der Antwort
+            expect(response.status).toBe(200);
+            // Es gibt keinen Slot-Konflikt, weder in der Nacht, noch am Tag
+            anzahlGruppen = await KonfliktGruppe.countDocuments();
+            expect(anzahlGruppen).toBe(0);
+
+            //Prüfung Einzelstatus der Anfragen
+            anfrage_V1 = await Anfrage.findOne({Zugnummer: "C1"});
+            anfrage_V2 = await Anfrage.findOne({Zugnummer: "C2"}); 
+
+            expect(anfrage_V1.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage_V1.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage_V1.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+            expect(anfrage_V2.Status).toBe('vollstaendig_final_bestaetigt');
+            expect(anfrage_V2.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_slot');
+            expect(anfrage_V2.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_slot');
+
+        });
+});
