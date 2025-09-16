@@ -61,8 +61,29 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse 
                     for (const zeit of zeiten) {
                         // Erstelle 2 Slots pro "Muster", um maxKap=1 zu erhalten
                         const [von, bis] = abschnitt.split('-');
-                        const slotData = { slotTyp: 'TAG', von, bis, Abschnitt: abschnitt, Kalenderwoche: kw, Verkehrstag: vt, Verkehrsart: commonParams.verkehrsart, Grundentgelt: commonParams.grundentgelt, Abfahrt: zeit.abf, Ankunft: zeit.ank };
-                        await request(app).post('/api/slots').send({ ...slotData, });
+                        const payload = {
+                                            // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                                            elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                                            Linienbezeichnung: "Li.4", // Optional
+                                            Verkehrstag: vt,
+                                            Abschnitt: abschnitt,
+                                            Kalenderwoche: kw,
+                                            
+                                            // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                                            // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                                            alternativen: [
+                                                {
+                                                    von: von,
+                                                    bis: bis,                    
+                                                    Grundentgelt: commonParams.grundentgelt,
+                                                    Abfahrt: zeit.abf,
+                                                    Ankunft: zeit.ank,
+                                                    Verkehrsart: commonParams.verkehrsart, 
+                                                }
+                                            ]
+                                        }; 
+                        //const slotData = { slotTyp: 'TAG', von, bis, Abschnitt: abschnitt, Kalenderwoche: kw, Verkehrstag: vt, Verkehrsart: commonParams.verkehrsart, Grundentgelt: commonParams.grundentgelt, Abfahrt: zeit.abf, Ankunft: zeit.ank };
+                        await request(app).post('/api/slots').send(payload);
                         //await new Slot(slotData).save(); // Speichere direkt für schnelleres Setup
                         //await new Slot({ ...slotData, SlotID_Sprechend: undefined }).save(); // Zweiter Slot mit gleichem Muster
                     }
@@ -73,8 +94,29 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse 
         //zusätzlich einen Slot SPNV, der von keiner Anfrage genutzt werden kann, erzeugen. Dieser Slot darf später nicht in den verfügbaren Alternativen auftauchen.
         const abschnitt = "A-X";
         const [von, bis] = abschnitt.split('-');
-        const slotData = { slotTyp: 'TAG', von, bis, Abschnitt: abschnitt, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", Grundentgelt: commonParams.grundentgelt, Abfahrt: { stunde: 9, minute: 25 }, Ankunft: { stunde: 10, minute: 55 } };
-        await request(app).post('/api/slots').send({ ...slotData, });
+        const payload = {
+                                            // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                                            elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                                            Linienbezeichnung: "Li.4", // Optional
+                                            Verkehrstag: "Mo-Fr",
+                                            Abschnitt: abschnitt,
+                                            Kalenderwoche: 2,
+                                            
+                                            // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                                            // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                                            alternativen: [
+                                                {
+                                                    von: von,
+                                                    bis: bis,                    
+                                                    Grundentgelt: commonParams.grundentgelt,
+                                                    Abfahrt: { stunde: 9, minute: 25 },
+                                                    Ankunft: { stunde: 10, minute: 55 },
+                                                    Verkehrsart: "SPNV", 
+                                                }
+                                            ]
+                                        }; 
+        //const slotData = { slotTyp: 'TAG', von, bis, Abschnitt: abschnitt, Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", Grundentgelt: commonParams.grundentgelt, Abfahrt: { stunde: 9, minute: 25 }, Ankunft: { stunde: 10, minute: 55 } };
+        await request(app).post('/api/slots').send(payload);
         
         console.log("TEST SETUP: Slots erstellt.");
 
@@ -141,7 +183,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/alternativen - Komplexe Analyse 
         const analyseFuerAnfrage1 = analyseData.find(a => a.anfrage._id === anfragenIdsFuerGruppe[0].toString());
         expect(analyseFuerAnfrage1).toBeDefined();
 
-        //console.log(JSON.stringify(analyseFuerAnfrage1)); 
+        console.log(JSON.stringify(analyseFuerAnfrage1)); 
 
         // Die Antwort sollte Alternativen für die KWs 2, 3 und 4 enthalten
         expect(analyseFuerAnfrage1.alternativen.map(a => a.Kalenderwoche).sort()).toEqual([2, 3, 4]);

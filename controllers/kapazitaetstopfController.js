@@ -97,7 +97,12 @@ exports.getKapazitaetstopfById = async (req, res) => {
         const topf = await Kapazitaetstopf.findOne({ $or: queryConditions })
             .populate({
                 path: 'ListeDerSlots', // Lade die zugeordneten Slots
-                select: 'SlotID_Sprechend Linienbezeichnung Abschnitt zugewieseneAnfragen' // Wähle die benötigten Felder
+                select: 'SlotID_Sprechend Linienbezeichnung gabelAlternativen zugewieseneAnfragen Abschnitt elternSlotTyp', // Wähle die benötigten Felder
+                populate: {
+                    path: 'gabelAlternativen',
+                    model: 'Slot', // Mongoose findet den richtigen Typ (Tag/Nacht) automatisch
+                    select: 'von bis Abschnitt Abfahrt Ankunft Zeitfenster SlotID_Sprechend Grundentgelt' // Lade die Streckendetails vom Kind
+                }
             })
             .populate({
                 path: 'ListeDerAnfragen', // Lade die zugeordneten Anfragen

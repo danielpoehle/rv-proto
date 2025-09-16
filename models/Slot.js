@@ -25,19 +25,71 @@ function mapAbfahrtstundeToKapazitaetstopfZeitfenster(stunde) {
 // 1. Das Basis-Schema mit allen GEMEINSAMEN Feldern
 // ======================================================
 const baseSlotSchema = new Schema({
+    // Der Typ des Slots (Eltern- oder Kind-Element)
+    slotStrukturTyp: {
+        type: String,
+        required: true,
+        enum: ['ELTERN', 'KIND'],
+        index: true
+    },
+
+    // --- Felder, die für BEIDE Typen relevant sind ---
     SlotID_Sprechend: { type: String, unique: true, sparse: true, index: true }, // Eindeutige, sprechende ID
     Linienbezeichnung: { type: String, trim: true, default: '' }, // optionaler Name der Linie des Slots, führt dann SlotID_Sprechend an.
-    von: { type: String, required: true, index: true },
-    bis: { type: String, required: true, index: true },
-    Abschnitt: { type: String, required: [true, 'Der Abschnitt ist für die Topf-Zuweisung erforderlich.'], index: true }, // für die Zuordnung zu den Kapazizätstöpfen
-    VerweisAufTopf: { type: Schema.Types.ObjectId, ref: 'Kapazitaetstopf', default: null, index: true },
     Verkehrstag: { type: String, required: true, enum: ['Mo-Fr', 'Sa+So'], index: true },
     Kalenderwoche: { type: Number, required: true, index: true }, // Globale relative KW
-    Grundentgelt: { type: Number, required: true, min: [0, 'Das Grundentgelt darf nicht negativ sein.'] }, // Entgelt für einmalige Nutzung (pro Tag)
+
+    // Die 'zugewieseneAnfragen'-Liste am Eltern-Teil ist der zentrale Punkt für die Konfliktprüfung.
+    // Am Kind-Teil ist sie nützlich, um zu sehen, welche Anfrage genau diese Alternative gewählt hat.
     zugewieseneAnfragen: [{ type: Schema.Types.ObjectId, ref: 'Anfrage', default: [] }],
+    
+
+    // --- Felder, die nur für einen Typ relevant sind ---
+    // ELTERN: beschreibt den Typ aller Kinder (TAG oder NACHT-Slots)
+    elternSlotTyp: {
+        type: String,
+        enum: ['TAG', 'NACHT'],
+        required: function() { return this.slotStrukturTyp === 'ELTERN'; }
+    },
+    // ELTERN: Liste der KIND-Slots als Alternativen. 
+    // Wenn es keine "echte" Gabel ist, dann gibt es nur ein KIND-Slot als einzige Alternative
+    gabelAlternativen: [{ 
+        type: Schema.Types.ObjectId, 
+        ref: 'Slot',
+        required: function() { return this.slotStrukturTyp === 'ELTERN'; } 
+    }],
+    // ELTERN: ELTERN-Slot ist der Repräsentant der Kapazität. 
+    // Die gesamte Gabel (also alle ihre KIND-Slots) soll im Kapazitätstopf nur als eine einzige Einheit gezählt werden
+    VerweisAufTopf: { 
+    type: Schema.Types.ObjectId, 
+    required: function() { return this.slotStrukturTyp === 'ELTERN'; }, 
+    ref: 'Kapazitaetstopf', 
+    default: null, 
+    index: true 
+    },
+
+    //ELTERN: Abschnitt 
+    Abschnitt: { type: String, required: [function() { return this.slotStrukturTyp === 'ELTERN'; }, 'Der Abschnitt ist für die Topf-Zuweisung erforderlich.'], index: true }, // für die Zuordnung zu den Kapazizätstöpfen   
+    
+
+
+    // KIND: Verweis auf den Eltern-Teil
+    gabelElternSlot: { 
+        type: Schema.Types.ObjectId, 
+        ref: 'Slot', 
+        default: null, 
+        index: true,
+        //required: function() { return this.slotStrukturTyp === 'KIND'; }, 
+    },
+    
+    // Streckendaten sind nur am KIND-Element
+    von: { type: String, required: function() { return this.slotStrukturTyp === 'KIND'; }, index: true },
+    bis: { type: String, required: function() { return this.slotStrukturTyp === 'KIND'; }, index: true },
+    Grundentgelt: { type: Number, required: function() { return this.slotStrukturTyp === 'KIND'; }, min: [0, 'Das Grundentgelt darf nicht negativ sein.'] }, // Entgelt für einmalige Nutzung (pro Tag)
+    
     slotTyp: { 
         type: String, 
-        required: true, 
+        required: function() { return this.slotStrukturTyp === 'KIND'; }, 
         enum: ['TAG', 'NACHT'] 
     },
 }, { 
@@ -51,54 +103,94 @@ function formatTimeForID(stunde, minute) {
     return `${String(stunde).padStart(2, '0')}${String(minute).padStart(2, '0')}`;
 }
 
+// Hilfsfunktion zum Bereinigen von Strings für die ID
+function sanitizeForId(input) {
+    if (!input) return '';
+    return input.toString().trim().toUpperCase().replace(/\s+/g, '_').replace(/[+]/g, '');
+}
+
 // ANGEPASSTER pre-save Hook, der zwischen TAG und NACHT unterscheidet
 baseSlotSchema.pre('save', async function(next) {
     //console.log(this);
     // Prüfe, ob die ID neu generiert werden muss
     if (this.isNew || !this.SlotID_Sprechend || this.isModified('Linienbezeichnung') || this.isModified('von') || this.isModified('bis') || this.isModified('Kalenderwoche') || this.isModified('Verkehrstag') || this.isModified('Abfahrt') || this.isModified('Zeitfenster') || this.isModified('Verkehrsart')) {
         
-        const linienPrefix = this.Linienbezeichnung 
-            ? `${this.Linienbezeichnung.trim().toUpperCase().replace(/\s+/g, '_')}_` 
-            : '';
+        // Verwende die Helferfunktion für alle String-Teile
+        const linienPrefix = this.Linienbezeichnung ? `${sanitizeForId(this.Linienbezeichnung)}_` : '';
+        const sanVon = sanitizeForId(this.von);
+        const sanBis = sanitizeForId(this.bis);
+        const sanVerkehrstag = sanitizeForId(this.Verkehrstag);
+        const sanVerkehrsart = sanitizeForId(this.Verkehrsart);
 
-        if (this.slotTyp === 'TAG') {
-            // ----- Logik für TAGES-Slots -----           
-            // Sicherheitscheck, da Abfahrt nur bei Tages-Slots existiert
-            if (this.Abfahrt) {
-                const abfahrtFormatted = formatTimeForID(this.Abfahrt.stunde, this.Abfahrt.minute);
-                this.SlotID_Sprechend = `${linienPrefix}SLOT_${this.von}_${this.bis}_KW${this.Kalenderwoche}_${this.Verkehrstag}_${abfahrtFormatted}_${this.Verkehrsart}`;
+        if (this.slotStrukturTyp === 'KIND') {
+            if (this.slotTyp === 'TAG') {
+                // ----- Logik für TAGES-Slots -----           
+                // Sicherheitscheck, da Abfahrt nur bei Tages-Slots existiert
+                if (this.Abfahrt) {
+                    const abfahrtFormatted = formatTimeForID(this.Abfahrt.stunde, this.Abfahrt.minute);
+                    this.SlotID_Sprechend = `K_${linienPrefix}SLOT_${sanVon}_${sanBis}_KW${this.Kalenderwoche}_${sanVerkehrstag}_${abfahrtFormatted}_${sanVerkehrsart}`;
+                }
+            } 
+            else if (this.slotTyp === 'NACHT') {
+                // ----- Logik für NACHT-Slots -----
+                // 1. Baue die Basis-ID ohne die laufende Nummer
+                const sanZeitfenster = sanitizeForId(this.Zeitfenster);
+                const baseId = `K_${linienPrefix}NACHT_SLOT_${sanVon}_${sanBis}_KW${this.Kalenderwoche}_${sanVerkehrstag}_ZF${sanZeitfenster}`;
+
+                // 2. Erstelle einen "sicheren" String für die RegExp, indem Sonderzeichen escaped werden
+                const escapeRegex = (string) => {
+                    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // \$& fügt das gefundene Zeichen nach dem Backslash ein
+                };
+                const safeBaseIdForRegex = escapeRegex(baseId);
+                const regex = new RegExp(`^${safeBaseIdForRegex}_`);
+                //console.log(regex);
+            
+                // `this.constructor` verweist auf das korrekte Modell (Slot, TagesSlot oder NachtSlot)
+                const existingSlots = await this.constructor.find({ SlotID_Sprechend: regex });
+
+                // 3. Finde die höchste existierende laufende Nummer
+                let highestNum = 0;
+                if (existingSlots.length > 0) {
+                    existingSlots.forEach(slot => {
+                        const numPart = slot.SlotID_Sprechend.split('_').pop();
+                        const num = parseInt(numPart, 10);
+                        if (!isNaN(num) && num > highestNum) {
+                            highestNum = num;
+                        }
+                    });
+                }
+                
+                // 4. Setze die neue ID mit der nächsthöheren Nummer
+                this.SlotID_Sprechend = `${baseId}_${highestNum + 1}`;
             }
-        } 
-        else if (this.slotTyp === 'NACHT') {
-            // ----- Logik für NACHT-Slots -----
-            // 1. Baue die Basis-ID ohne die laufende Nummer
-            const baseId = `NACHT_SLOT_${this.von}_${this.bis}_KW${this.Kalenderwoche}_${this.Verkehrstag}_${this.Zeitfenster}`;
+        }
+        else if (this.slotStrukturTyp === 'ELTERN') {
+            // ----- NEUE LOGIK FÜR ELTERN-SLOTS -----
+            if (!this.gabelAlternativen || this.gabelAlternativen.length === 0) {
+                console.warn(`ELTERN-Slot ${this._id} wird ohne gabelAlternativen gespeichert. SlotID_Sprechend kann nicht generiert werden.`);
+                return next();
+            }
 
-            // 2. Erstelle einen "sicheren" String für die RegExp, indem Sonderzeichen escaped werden
-            const escapeRegex = (string) => {
-                return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // \$& fügt das gefundene Zeichen nach dem Backslash ein
-            };
-            const safeBaseIdForRegex = escapeRegex(baseId);
-            const regex = new RegExp(`^${safeBaseIdForRegex}_`);
-        
-            // `this.constructor` verweist auf das korrekte Modell (Slot, TagesSlot oder NachtSlot)
-            const existingSlots = await this.constructor.find({ SlotID_Sprechend: regex });
-
-            // 3. Finde die höchste existierende laufende Nummer
-            let highestNum = 0;
-            if (existingSlots.length > 0) {
-                existingSlots.forEach(slot => {
-                    const numPart = slot.SlotID_Sprechend.split('_').pop();
-                    const num = parseInt(numPart, 10);
-                    if (!isNaN(num) && num > highestNum) {
-                        highestNum = num;
-                    }
-                });
+            const firstChildId = this.gabelAlternativen[0];
+            // Lade das erste Kind, um an seine ID zu kommen
+            const firstChild = await mongoose.model('Slot').findById(firstChildId).select('SlotID_Sprechend');
+            
+            if (!firstChild || !firstChild.SlotID_Sprechend) {
+                console.error(`Konnte den ersten Kind-Slot (${firstChildId}) oder dessen SlotID_Sprechend nicht finden, um die Eltern-ID zu generieren.`);
+                return next();
             }
             
-            // 4. Setze die neue ID mit der nächsthöheren Nummer
-            this.SlotID_Sprechend = `${baseId}_${highestNum + 1}`;
+            const kindIdSprechend = firstChild.SlotID_Sprechend;
+
+            // Ersetze das "K_" des Kindes durch "E_" für den Eltern-Teil
+            if (kindIdSprechend.startsWith('K_')) {
+                this.SlotID_Sprechend = 'E_' + kindIdSprechend.substring(2);
+            } else {
+                // Fallback, falls das Kind-Präfix fehlt
+                this.SlotID_Sprechend = 'E_' + kindIdSprechend;
+            }
         }
+        
     }
     next();
 });
@@ -153,6 +245,10 @@ baseSlotSchema.pre('deleteOne', { document: true, query: false }, async function
 
 // Erstelle das Basis-Modell
 const Slot = mongoose.model('Slot', baseSlotSchema);
+
+// Ein "ELTERN"-Slot wird jetzt so erstellt:
+// new Slot({ slotStrukturTyp: 'ELTERN', elternSlotTyp: 'TAG', ... })
+// Er hat KEINEN `slotTyp` (discriminatorKey).
 
 // ======================================================
 // 2. Das spezialisierte Modell für TAGES-Slots

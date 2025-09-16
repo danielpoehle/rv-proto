@@ -77,10 +77,13 @@ function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloes
         return null;
     }
 
+    //console.log(`updateAnfrageSlotsStatusFuerTopf: anfrageDoc ${anfrageDoc}, neuerEinzelStatus ${neuerEinzelStatus}, ausloesenderTopfObjectId ${ausloesenderTopfObjectId}, konfliktDokuId ${konfliktDokuId}`);
+
     let anfrageModifiziert = false;
     if (anfrageDoc.ZugewieseneSlots.length > 0) {
         for (const zuweisung of anfrageDoc.ZugewieseneSlots) {
             // Prüfe, ob der Slot in der Zuweisung zum aktuellen auslösenden Topf gehört
+            //console.log(`zuweisung ${zuweisung}, zuweisung.slot ${zuweisung.slot}, zuweisung.slot.VerweisAufTopf ${zuweisung.slot.VerweisAufTopf}, ausloesenderTopfObjectId ${ausloesenderTopfObjectId}`);
             if (zuweisung.slot && zuweisung.slot.VerweisAufTopf && zuweisung.slot.VerweisAufTopf.equals(ausloesenderTopfObjectId)) {
                 
                 if(neuerEinzelStatus === 'wartet_konflikt_topf'){
@@ -109,7 +112,7 @@ function updateAnfrageSlotsStatusFuerTopf(anfrageDoc, neuerEinzelStatus, ausloes
 
     if (anfrageModifiziert) {
         anfrageDoc.markModified('ZugewieseneSlots');        
-        console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} auf ${anfrageDoc.Status} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
+        //console.log(`Einzelstatus und Gesamtstatus für Anfrage ${anfrageDoc.AnfrageID_Sprechend || anfrageDoc._id} auf ${anfrageDoc.Status} aktualisiert (neuer Einzelstatus für Topf ${ausloesenderTopfObjectId}: ${neuerEinzelStatus}).`);
     }
     return anfrageDoc;
 };
@@ -1115,7 +1118,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
         }
 
         // 2. Lade alle Slots mit ihren zugewiesenen Anfragen
-        const alleSlots = await Slot.find({})
+        const alleSlots = await Slot.find({ slotStrukturTyp: 'ELTERN' })
             .populate({
                 path: 'zugewieseneAnfragen', // Anfragen, die diesen Slot wollen
                 select: 'ZugewieseneSlots Status Zugnummer EVU', // Für die Status-Prüfung der Anfrage
@@ -1194,7 +1197,7 @@ exports.identifiziereSlotKonflikte = async (req, res) => {
             
             let maxKapazitaetSlot = 1;
             //wenn es ein Nacht-Slot ist, dann werden alle Anfragen zugewiesen, d.h. wir haben immer ausreichend Kapazität für alle Anfragen
-            if(slot.slotTyp === "NACHT"){
+            if(slot.elternSlotTyp === "NACHT"){
                 maxKapazitaetSlot = aktiveAnfragenFuerSlot.length + 1;
             }
 
@@ -2759,23 +2762,46 @@ exports.getAlternativSlotsFuerGruppe = async (req, res) => {
         }
         const desiredVonBisPairs = Array.from(uniqueDesiredSegments.values());
 
-        // 3. Finde alle potenziell passenden alternativen Slots mit verfeinertem Filter
-        const potentialAlternativeSlots = await Slot.find({
-            zugewieseneAnfragen: { $size: 0 },
+        // 3. Finde alle potenziell passenden alternativen Slots (in 2 Schritten)
+
+        // Schritt 3a: Finde alle ELTERN-Slots, die zeitlich passen und komplett frei sind.
+        const freieElternSlots = await Slot.find({
+            slotStrukturTyp: 'ELTERN', // Nur Eltern
+            zugewieseneAnfragen: { $size: 0 }, // Nur komplett freie Slot-Gruppen
             Kalenderwoche: { $in: Array.from(relevanteKonfliktKWs) },
-            Verkehrstag: { $in: Array.from(relevanteVerkehrstage) }, // NEUER, EFFIZIENTER FILTER
-            $or: desiredVonBisPairs
+            Verkehrstag: { $in: Array.from(relevanteVerkehrstage) }
+        }).select('gabelAlternativen'); // Wir brauchen nur die Referenzen auf die Kinder
+
+        // Sammle alle Kind-IDs aus den gefundenen freien Eltern-Slots
+        const potentielleKindSlotIds = freieElternSlots.flatMap(e => e.gabelAlternativen);
+
+        if (potentielleKindSlotIds.length === 0) {
+            return res.status(200).json({ message: `Analyse für konfliktfreie Alternativen für Gruppe ${gruppenId} erfolgreich: Keine freien alternativen Slots gefunden.`, data: [] });
+        }
+
+        // Schritt 3b: Lade jetzt die KIND-Slots, die zu den freien Eltern gehören
+        // UND den gewünschten Streckenabschnitten entsprechen.
+        const potentialAlternativeSlots = await Slot.find({
+            _id: { $in: potentielleKindSlotIds },
+            slotStrukturTyp: 'KIND',
+            $or: desiredVonBisPairs // Filtere nach den gewünschten von-bis Paaren
         })
         // Tieferes Populate, um Daten für die Zählung zu bekommen
         .populate({
-            path: 'VerweisAufTopf',
-            populate: {
-                path: 'ListeDerAnfragen',
-                select: 'ZugewieseneSlots',
+            path: 'gabelElternSlot', // 1. Populiere den Eltern-Slot des Kindes
+            select: 'VerweisAufTopf',   // Wir brauchen vom Eltern-Slot nur den Verweis auf den Topf
+            populate: {             // 2. Populiere jetzt den Kapazitätstopf, der am Eltern-Slot hängt
+                path: 'VerweisAufTopf',
+                model: 'Kapazitaetstopf',
+                // 3. Lade alle Daten, die wir für die intelligente Kapazitätsprüfung benötigen
                 populate: {
-                    path: 'ZugewieseneSlots.slot',
-                    model: 'Slot',
-                    select: 'VerweisAufTopf'
+                    path: 'ListeDerAnfragen',
+                    select: 'ZugewieseneSlots',
+                    populate: {
+                        path: 'ZugewieseneSlots.slot',
+                        model: 'Slot',
+                        select: 'VerweisAufTopf'
+                    }
                 }
             }
         });

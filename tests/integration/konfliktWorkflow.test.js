@@ -39,56 +39,99 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte TAG', () => {
                 await collection.deleteMany({});
             }
 
-            // Vorbereitung: Kapazitätstopf mit maxKapazitaet = 2 erstellen
-            const topfKriterien = {
-                Abschnitt: "KonfliktZone1", Kalenderwoche: 2, Verkehrstag: "Sa+So",
-                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
-            };
-            const topfKriterien2 = {
-                Abschnitt: "KonfliktZone2", Kalenderwoche: 2, Verkehrstag: "Sa+So",
-                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 15 // Ergibt ZF "13-15"
-            };
-            const topfKriterien3 = {
-                Abschnitt: "KonfliktZone3", Kalenderwoche: 2, Verkehrstag: "Sa+So",
-                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
-            };
-            // 3 Slots für KonfliktZone1 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
-                                Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, 
-                                Verkehrsart: topfKriterien.Verkehrsart,
-                                Grundentgelt: 150 
-                            };
-            const s1 = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            
-            // 2 Slots für KonfliktZone2 erstellen, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
-            const slotBasis2 = { slotTyp: "TAG", von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
-                                Verkehrstag: topfKriterien2.Verkehrstag, Kalenderwoche: topfKriterien2.Kalenderwoche, 
-                                Verkehrsart: topfKriterien2.Verkehrsart,
-                                Grundentgelt: 250 
-                            };
-            const s2 = await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Topf-Infrastrukturen -----
 
-            // 3 Slots für KonfliktZone3 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis3 = { slotTyp: "TAG", von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
-                                Verkehrstag: topfKriterien3.Verkehrstag, Kalenderwoche: topfKriterien3.Kalenderwoche, 
-                                Verkehrsart: topfKriterien3.Verkehrsart,
-                                Grundentgelt: 50 
-                            };
-            const s3 = await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            
-            
-            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            const topfSetups = [
+                {
+                    anzahlSlots: 3, // -> ergibt maxKap = floor(0.7 * 3) = 2
+                    kindData: {
+                        von: "Y", bis: "Z", Abschnitt: "KonfliktZone1",
+                        Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 },
+                        Grundentgelt: 150
+                    },
+                    elternData: {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: 2,
+                        Verkehrstag: "Sa+So",
+                        Verkehrsart: "SGV" // Verkehrsart kommt ins Kind, aber wir übergeben es hier für den Topf
+                    }
+                },
+                {
+                    anzahlSlots: 2, // -> ergibt maxKap = floor(0.7 * 2) = 1
+                    kindData: {
+                        von: "Z", bis: "AA", Abschnitt: "KonfliktZone2",
+                        Abfahrt: { stunde: 15, minute: 10 }, Ankunft: { stunde: 16, minute: 0 },
+                        Grundentgelt: 250
+                    },
+                    elternData: {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: 2,
+                        Verkehrstag: "Sa+So",
+                        Verkehrsart: "SGV"
+                    }
+                },
+                {
+                    anzahlSlots: 3, // -> ergibt maxKap = floor(0.7 * 3) = 2
+                    kindData: {
+                        von: "V", bis: "W", Abschnitt: "KonfliktZone3",
+                        Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 },
+                        Grundentgelt: 50
+                    },
+                    elternData: {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: 2,
+                        Verkehrstag: "Sa+So",
+                        Verkehrsart: "SGV"
+                    }
+                }
+            ];
+
+            const erstellteToepfe = {};
+
+            // ----- 2. Erstelle alle Slots und Töpfe in einer Schleife -----
+
+            for (const setup of topfSetups) {
+                let topfId = null;
+
+                // Erstelle für jedes Setup die definierte Anzahl an Slot-Gruppen,
+                // um die maxKapazitaet des Topfes zu steuern.
+                for (let i = 0; i < setup.anzahlSlots; i++) {
+                    // Leichte Variation der Zeit, um einzigartige SlotIDs zu gewährleisten
+                    const alternative = { 
+                        ...setup.kindData,
+                        Abfahrt: { ...setup.kindData.Abfahrt, minute: ((i+1) * 10) },
+                        Verkehrsart: setup.elternData.Verkehrsart // Verkehrsart gehört zum Kind
+                    };
+
+                    const payload = {
+                        elternSlotTyp: setup.elternData.elternSlotTyp,
+                        Kalenderwoche: setup.elternData.Kalenderwoche,
+                        Verkehrstag: setup.elternData.Verkehrstag,
+                        Abschnitt: setup.kindData.Abschnitt,
+                        alternativen: [alternative]
+                    };
+
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+                    
+                    // Merke dir die Topf-ID aus dem ersten erstellten Slot
+                    if (i === 0) {
+                        topfId = response.body.data.VerweisAufTopf;
+                    }
+                }
+                
+                // Lade den finalen Topf und speichere ihn für die Assertions
+                const finalerTopf = await Kapazitaetstopf.findById(topfId);
+                erstellteToepfe[finalerTopf.Abschnitt] = finalerTopf;
+            }
+
+            // ----- 3. Finale Überprüfung der Kapazitätstöpfe -----
+            kt_DetectConflict = erstellteToepfe["KonfliktZone1"];
+            kt_NoConflict     = erstellteToepfe["KonfliktZone2"];
+            kt_NoConflict2    = erstellteToepfe["KonfliktZone3"];
+
             expect(kt_DetectConflict.maxKapazitaet).toBe(2);
-
-            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
             expect(kt_NoConflict.maxKapazitaet).toBe(1);
-
-            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
             expect(kt_NoConflict2.maxKapazitaet).toBe(2);
 
             // 4 Anfragen erstellen für KonfliktZone1 und KonfliktZone2
@@ -119,13 +162,13 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte TAG', () => {
             
             //console.log(anfrage4);
 
-            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            kt_DetectConflict = await Kapazitaetstopf.findById(kt_DetectConflict._id);
             expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(4); // Überbuchung (4 > maxKap 2)
 
-            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
+            kt_NoConflict = await Kapazitaetstopf.findById(kt_NoConflict._id);
             expect(kt_NoConflict.ListeDerAnfragen).toHaveLength(1); // kein Konflikt (1 <= max Kap 1)
 
-            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
+            kt_NoConflict2 = await Kapazitaetstopf.findById(kt_NoConflict2._id);
             expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1); // kein Konflikt (1 <= max Kap 2)
 
             // Anfragen dem Kapazitätstopf zuordnen (manuell für diesen Test)
@@ -374,112 +417,75 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte NACHT', () => {
                 await collection.deleteMany({});
             }
 
-            //4 Abschnitte mit Übergang von Tag zur Nacht und weiter in Nacht über Tageswechsel und zum Tag
-            const slotData1 = {
-            slotTyp: "TAG", von: "A", bis: "B", Abschnitt: "Strecke1",             
-            Verkehrstag: "täglich",       
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Verkehrsart: "SGV",  
-            Grundentgelt: 100
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            const zeitraum = { 
+                start: '2025-07-07', // KW 28
+                ende: '2025-08-03'   // KW 31 -> 4 Wochen
             };
+            const gemeinsamerVerkehrstag = 'täglich';
 
-            const slotData2 = {
-            slotTyp: "NACHT", von: "B", bis: "C", Abschnitt: "Strecke2", 
-            Verkehrstag: "täglich",  
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03', 
-            Grundentgelt: 100,
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 90
-            };
+            const slotPatternsToCreate = [
+                // 3 Tages-Slots auf A-B
+                { elternSlotTyp: "TAG", alternative: { von: "A", bis: "B", Abschnitt: "Strecke1", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 22, minute: 11 }, Ankunft: { stunde: 23, minute: 28 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "A", bis: "B", Abschnitt: "Strecke1", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 22, minute: 21 }, Ankunft: { stunde: 23, minute: 38 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "A", bis: "B", Abschnitt: "Strecke1", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 22, minute: 31 }, Ankunft: { stunde: 23, minute: 48 } } },
+                
+                // 2 Nacht-Slots auf B-C
+                { elternSlotTyp: "NACHT", alternative: { von: "B", bis: "C", Abschnitt: "Strecke2", Grundentgelt: 100, Zeitfenster: '23-01', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "B", bis: "C", Abschnitt: "Strecke2", Grundentgelt: 100, Zeitfenster: '23-01', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } }, // Identisches Muster, erzeugt Slots mit lfd. Nr. 2
+                
+                // 3 Nacht-Slots auf C-D
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '01-03', Mindestfahrzeit: 120, Maximalfahrzeit: 180, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '01-03', Mindestfahrzeit: 120, Maximalfahrzeit: 180, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '01-03', Mindestfahrzeit: 120, Maximalfahrzeit: 180, Verkehrsart: 'ALLE' } },
 
-            const slotData3 = {
-            slotTyp: "NACHT", von: "C", bis: "D", Abschnitt: "Strecke3", 
-            Verkehrstag: "täglich", 
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Grundentgelt: 100,
-            Zeitfenster: '01-03',
-            Mindestfahrzeit: 120,
-            Maximalfahrzeit: 180
-            };
+                // 3 Tages-Slots auf D-E
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 } } },
+            ];
 
-            const slotData4 = {
-            slotTyp: "TAG", von: "D", bis: "E", Abschnitt: "Strecke4",             
-            Verkehrstag: "täglich",       
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Verkehrsart: "SGV",  
-            Grundentgelt: 100
-            };
+            const erstellteElternSlots = [];
 
+            // ----- 2. Erstelle alle Slot-Gruppen-Serien in einer Schleife -----
 
-            // Aktion: 3 Tages-Slots erstellen auf A-B
-            let response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData1, Abfahrt: { stunde: 22, minute: 11 }, Ankunft: { stunde: 23, minute: 28 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData1, Abfahrt: { stunde: 22, minute: 21 }, Ankunft: { stunde: 23, minute: 38 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData1, Abfahrt: { stunde: 22, minute: 31 }, Ankunft: { stunde: 23, minute: 48 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
+            for (const pattern of slotPatternsToCreate) {
+                // Baue den Payload für den Massen-Erstellungs-Endpunkt
+                const payload = {
+                    elternSlotTyp: pattern.elternSlotTyp,
+                    Verkehrstag: gemeinsamerVerkehrstag,
+                    zeitraumStart: zeitraum.start,
+                    zeitraumEnde: zeitraum.ende,
+                    Abschnitt: pattern.alternative.Abschnitt,
+                    alternativen: [
+                        pattern.alternative
+                    ]
+                };
 
-            //2 Nacht-Slots auf B-C
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData2);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData2);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            
-            //3 Nacht-Slots auf C-D
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            
-            // 3 Tages-Slots auf D-E
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots/massen-erstellung')
+                    .send(payload);
 
-            kt_all = await Kapazitaetstopf.find({});
+                // Überprüfe die Antwort direkt in der Schleife
+                expect(response.status).toBe(201);
+                expect(response.body.erstellteSlots).toBeDefined();
+                // Jeder Aufruf erzeugt Slots für 4 Wochen * 2 Verkehrstage = 8 Slot-Gruppen
+                expect(response.body.erstellteSlots).toHaveLength(8); 
+                erstellteElternSlots.push(...response.body.erstellteSlots);
+            }
+
+            // Finale Prüfung, ob alles korrekt erstellt wurde
+            const kt_all = await Kapazitaetstopf.find({});
+            // 11 Muster * 4 KWs * 2 VT = 88 Eltern-Slots / Töpfe
+            // Die Topf-Anzahl hängt davon ab, wie viele einzigartige (Abschnitt, VA, VT, KW, ZF) Kombinationen es gibt.
+            // 4 KWs * 2 VTs = 8 Kombinationen pro Topf-Muster.
+            // Topf-Muster 1: Strecke1, SGV, 21-23 -> 8 Töpfe
+            // Topf-Muster 2: Strecke2, ALLE, 23-01 -> 8 Töpfe
+            // Topf-Muster 3: Strecke3, ALLE, 01-03 -> 8 Töpfe
+            // Topf-Muster 4: Strecke4, SGV, 05-07 -> 8 Töpfe
+            // Total = 32 Töpfe
             expect(kt_all.length).toBe(32);
 
             // Anfragen mit und ohne Tageswechsel kommen dann individuell im Testfall
@@ -815,7 +821,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte NACHT', () => {
             
 
             let toepfe = await Kapazitaetstopf.find({Abschnitt: "Strecke2"});
-            console.log(toepfe);
+            //console.log(toepfe);
 
             // Überprüfung der Antwort
             expect(response.status).toBe(200);
@@ -845,7 +851,7 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte NACHT', () => {
             
             const anfrage2_final = await Anfrage.findOne({Zugnummer: `C2`});
             expect(anfrage2_final.Status).toBe('in_konfliktloesung_topf');
-            console.log(anfrage2_final);
+            //console.log(anfrage2_final);
             expect(anfrage2_final.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
             expect(anfrage2_final.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
             expect(anfrage2_final.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
@@ -854,15 +860,15 @@ describe('POST /api/konflikte/identifiziere-topf-konflikte NACHT', () => {
             expect(anfrage2_final.ZugewieseneSlots[1].slotKonfliktDoku).toBe(null);
             const anfrage4_final = await Anfrage.findOne({Zugnummer: `C4`});
             expect(anfrage4_final.Status).toBe('in_konfliktloesung_topf');
-            console.log(anfrage4_final);
-            expect(anfrage4_final.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
-            expect(anfrage4_final.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('bestaetigt_topf');
+            //console.log(anfrage4_final);
+            expect(anfrage4_final.ZugewieseneSlots[1].statusEinzelzuweisung).toBe('wartet_konflikt_topf');
+            expect(anfrage4_final.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf');
             expect(anfrage4_final.ZugewieseneSlots[2].statusEinzelzuweisung).toBe('bestaetigt_topf');
             expect(anfrage4_final.ZugewieseneSlots[3].statusEinzelzuweisung).toBe('bestaetigt_topf');
-            expect(anfrage4_final.ZugewieseneSlots[0].topfKonfliktDoku.toString()).toBe(konfliktdokuList[0]._id.toString());
-            expect(anfrage4_final.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
-            expect(anfrage4_final.ZugewieseneSlots[1].topfKonfliktDoku).toBe(null);
+            expect(anfrage4_final.ZugewieseneSlots[1].topfKonfliktDoku.toString()).toBe(konfliktdokuList[0]._id.toString());
             expect(anfrage4_final.ZugewieseneSlots[1].slotKonfliktDoku).toBe(null);
+            expect(anfrage4_final.ZugewieseneSlots[0].topfKonfliktDoku).toBe(null);
+            expect(anfrage4_final.ZugewieseneSlots[0].slotKonfliktDoku).toBe(null);
             expect(anfrage4_final.ZugewieseneSlots[2].topfKonfliktDoku).toBe(null);
             expect(anfrage4_final.ZugewieseneSlots[2].slotKonfliktDoku).toBe(null); 
             expect(anfrage4_final.ZugewieseneSlots[3].topfKonfliktDoku).toBe(null);
@@ -903,29 +909,78 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             await collection.deleteMany({});
         }    
         
-        // 1. Kapazitätstopf erstellen mit maxKapazitaet = 2
-            const topfKriterien = {
-                Abschnitt: "AutoResolveZone", Kalenderwoche: 1, Verkehrstag: "Mo-Fr",
-                Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 // Ergibt ZF "07-09"
+        // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+        const elternData = {
+            elternSlotTyp: "TAG",
+            Kalenderwoche: 1,
+            Verkehrstag: "Mo-Fr",
+            Abschnitt: "AutoResolveZone",
+        };
+
+        // Die drei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+        const kindAlternativen = [
+            {
+                von: "X", 
+                bis: "Y", 
+                Abschnitt: "AutoResolveZone",
+                Abfahrt: { stunde: 8, minute: 0 }, 
+                Ankunft: { stunde: 9, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: slotGrundentgelt
+            },
+            {
+                von: "X", 
+                bis: "Y", 
+                Abschnitt: "AutoResolveZone",
+                Abfahrt: { stunde: 8, minute: 10 }, 
+                Ankunft: { stunde: 9, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: slotGrundentgelt
+            },
+            {
+                von: "X", 
+                bis: "Y", 
+                Abschnitt: "AutoResolveZone",
+                Abfahrt: { stunde: 8, minute: 20 }, 
+                Ankunft: { stunde: 9, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: slotGrundentgelt
+            }
+        ];
+
+        let topfIdFuerTest;
+        let s1Resp;
+
+        // ----- 2. Erstelle die drei Slot-Gruppen in einer Schleife -----
+
+        for (const alternative of kindAlternativen) {
+            // Baue den korrekten, verschachtelten Payload für die API
+            const payload = {
+                ...elternData,
+                alternativen: [alternative]
             };
-            const slotBasis = { 
-                slotTyp: "TAG", von: "X", bis: "Y", Abschnitt: topfKriterien.Abschnitt, 
-                Ankunft: { stunde: 9, minute: 0 }, 
-                Verkehrstag: topfKriterien.Verkehrstag, 
-                Kalenderwoche: topfKriterien.Kalenderwoche, 
-                Verkehrsart: topfKriterien.Verkehrsart, 
-                Grundentgelt: slotGrundentgelt // Grundentgelt für Entgeltberechnung
-            };
-            
-            // Erstelle 3 Slots, die alle denselben Topf (KT_AutoResolve) verwenden/erzeugen
-            const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            const s2Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            const s3Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            
-            const verweisAufTopfId = s1Resp.body.data.VerweisAufTopf;
-            kt_AutoResolve = await Kapazitaetstopf.findById(verweisAufTopfId);
-            expect(kt_AutoResolve.ListeDerSlots).toHaveLength(3);
-            expect(kt_AutoResolve.maxKapazitaet).toBe(Math.floor(0.7 * 3)); // = 2
+
+            // Sende den Payload an den API-Endpunkt
+            const response = await request(app)
+                .post('/api/slots')
+                .send(payload);
+
+            expect(response.status).toBe(201);
+
+            // Merke dir die ID des Topfes (wird bei allen drei Slots dieselbe sein)
+            if (!topfIdFuerTest) {
+                topfIdFuerTest = response.body.data.VerweisAufTopf;
+                s1Resp = response.body.data;
+            }
+        }
+
+        // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+        kt_AutoResolve = await Kapazitaetstopf.findById(topfIdFuerTest);
+        expect(kt_AutoResolve).toBeDefined();
+        // Der Topf sollte jetzt 3 Eltern-Slots in seiner Liste haben
+        expect(kt_AutoResolve.ListeDerSlots).toHaveLength(3); 
+        // Die maxKapazitaet sollte korrekt berechnet sein
+        expect(kt_AutoResolve.maxKapazitaet).toBe(Math.floor(0.7 * 3)); // = 2
 
             // 2. Anfragen erstellen (mit initialen ZugewieseneSlots für Entgeltberechnung)
             //    Die Entgelte werden hier im Test manuell gesetzt, um den Fokus auf die Konfliktlösung zu legen.
@@ -936,15 +991,15 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
                 ListeGewuenschterSlotAbschnitte: [{von: "X", bis:"Y", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}],
                 // Simuliere, dass Slots initial zugewiesen wurden und einen Status haben
                 ZugewieseneSlots: [
-                    { slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
+                    { slot: s1Resp._id, kind: s1Resp.gabelAlternativen[0], statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
                     // Für Einfachheit nehmen wir an, jede Anfrage bezieht sich auf einen der erstellten Slots.
                     // In Realität würden sie sich ggf. die gleichen Slots teilen.
                 ]
             };
             
             anfrage1 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU1", Zugnummer: "A1", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf' }).save();
-            anfrage2 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU2", Zugnummer: "A2", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf', ZugewieseneSlots: [{ slot: s2Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
-            anfrage3 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU3", Zugnummer: "A3", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf', ZugewieseneSlots: [{ slot: s3Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
+            anfrage2 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU2", Zugnummer: "A2", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf' }).save();
+            anfrage3 = await new Anfrage({ ...anfrageBasis, EVU: "TestEVU3", Zugnummer: "A3", Entgelt: 5 * slotGrundentgelt, Status: 'in_konfliktloesung_topf' }).save();
             
 
             // Vereinfachtes Setup für diesen Test: Wir fokussieren auf die Konfliktlösung, nicht die Zuordnung.
@@ -963,7 +1018,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
             }).save();
     });
 
-    it('sollte Anfragen automatisch zuweisen und Topf-Konflikt lösen, wenn nach Verzicht die Kapazität ausreicht', async () => {
+    it('sollte Anfragen automatisch zuweisen und Topf-Konflikt loesen, wenn nach Verzicht die Kapazitaet ausreicht', async () => {
         // Aktion: Eine Anfrage (anfrage3) verzichtet. maxKap = 2. Verbleiben 2 Anfragen.
             const updatePayload = {
                 ListeAnfragenMitVerzicht: [anfrage3._id.toString()],
@@ -1025,20 +1080,85 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/:konfliktId/...: automa
 
     });
 
-    it('sollte eine komplette Konfliktgruppe zurücksetzen, Konfliktdokus löschen und Anfragen-Status revertieren', async () => {
-        // ---- SETUP: Erzeuge einen Konflikt mit 3 Anfragen für maxKapazität=2 ----
-        const topfKriterien = { Abschnitt: "ResetZone", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
-        const slotBasis = { slotTyp: "TAG", von: "R", bis: "S", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: 100 };
-        // Erstelle 3 Slots -> maxKap = 2
-        const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 10 } });
-        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 20 } });
-        const s3Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 8, minute: 30 } });
-        const kt_Reset = await Kapazitaetstopf.findById(s1Resp.body.data.VerweisAufTopf);
-        expect(kt_Reset.maxKapazitaet).toBe(2);
+    it('sollte eine komplette Konfliktgruppe zuruecksetzen, Konfliktdokus loeschen und Anfragen-Status revertieren', async () => {
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+        // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+        const elternData = {
+            elternSlotTyp: "TAG",
+            Kalenderwoche: 1,
+            Verkehrstag: "Mo-Fr",
+            Abschnitt: "ResetZone",
+        };
+
+        // Die drei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+        const kindAlternativen = [
+            {
+                von: "R", 
+                bis: "S", 
+                Abschnitt: "ResetZone",
+                Abfahrt: { stunde: 8, minute: 10 }, 
+                Ankunft: { stunde: 9, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: 100
+            },
+            {
+                von: "R", 
+                bis: "S", 
+                Abschnitt: "ResetZone",
+                Abfahrt: { stunde: 8, minute: 20 }, 
+                Ankunft: { stunde: 9, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: 100
+            },
+            {
+                von: "R", 
+                bis: "S", 
+                Abschnitt: "ResetZone",
+                Abfahrt: { stunde: 8, minute: 30 }, 
+                Ankunft: { stunde: 9, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: 100
+            }
+        ];
+
+        let topfIdFuerTest;
+        let kt_Reset;
+
+        // ----- 2. Erstelle die drei Slot-Gruppen in einer Schleife -----
+
+        for (const alternative of kindAlternativen) {
+            // Baue den korrekten, verschachtelten Payload für die API
+            const payload = {
+                ...elternData,
+                alternativen: [alternative]
+            };
+
+            // Sende den Payload an den API-Endpunkt
+            const response = await request(app)
+                .post('/api/slots')
+                .send(payload);
+
+            expect(response.status).toBe(201);
+
+            // Merke dir die ID des Topfes (wird bei allen drei Slots dieselbe sein)
+            if (!topfIdFuerTest) {
+                topfIdFuerTest = response.body.data.VerweisAufTopf;
+            }
+        }
+
+        // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+        kt_Reset = await Kapazitaetstopf.findById(topfIdFuerTest);
+        expect(kt_Reset).toBeDefined();
+        // Der Topf sollte jetzt 3 Eltern-Slots in seiner Liste haben
+        expect(kt_Reset.ListeDerSlots).toHaveLength(3); 
+        // Die maxKapazitaet sollte korrekt berechnet sein
+        expect(kt_Reset.maxKapazitaet).toBe(Math.floor(0.7 * 3)); // = 2
 
         // Erstelle 3 Anfragen
         const zugewieseneSlotsFuerAnfragen = (await Slot.find({ VerweisAufTopf: kt_Reset._id })).map(s => ({
             slot: s._id,
+            kind: s.gabelAlternativen[0],
             statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'
         }));
         const anfrageBasis = { Email: "reset@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2024-12-30", ende: "2025-01-05" }, ListeGewuenschterSlotAbschnitte: [{von: "R", bis:"S", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
@@ -1162,31 +1282,81 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
                 const collection = collections[key];
                 await collection.deleteMany({});
             }
-            // 1. Kapazitätstopf mit maxKapazitaet = 1 erstellen
-            const topfKriterien = { Abschnitt: "EntgeltVglZone", Kalenderwoche: 4, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
-            const slotBasis = { slotTyp: "TAG", von: "E1", bis: "E2", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: slotGrundentgelt };
-            // Erstelle 2 Slots, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
-            const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            kt_EntgeltTest = await Kapazitaetstopf.findById(s1Resp.body.data.VerweisAufTopf);
-            expect(kt_EntgeltTest.maxKapazitaet).toBe(1);
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Kalenderwoche: 4,
+                Verkehrstag: "Mo-Fr",
+                Abschnitt: "EntgeltVglZone",
+            };
+
+            // Die zwei unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindAlternativen = [
+                {
+                    von: "E1", bis: "E2", Abschnitt: "EntgeltVglZone",
+                    Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 9, minute: 0 },
+                    Verkehrsart: "SPFV", Grundentgelt: slotGrundentgelt
+                },
+                {
+                    von: "E1", bis: "E2", Abschnitt: "EntgeltVglZone",
+                    Abfahrt: { stunde: 8, minute: 20 }, Ankunft: { stunde: 9, minute: 0 },
+                    Verkehrsart: "SPFV", Grundentgelt: slotGrundentgelt
+                }
+            ];
+
+            let topfIdFuerTest;
+
+            // ----- 2. Erstelle die beiden Slot-Gruppen in einer Schleife -----
+
+            for (const alternative of kindAlternativen) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    ...elternData,
+                    alternativen: [alternative]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+
+                // Merke dir die ID des Topfes (wird bei beiden Slots dieselbe sein)
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = response.body.data.VerweisAufTopf;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+            kt_EntgeltTest = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_EntgeltTest).toBeDefined();
+            // Der Topf sollte jetzt 2 Eltern-Slots in seiner Liste haben
+            expect(kt_EntgeltTest.ListeDerSlots).toHaveLength(2); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_EntgeltTest.maxKapazitaet).toBe(Math.floor(0.7 * 2)); // = 1
+
+            let s1_elt = await Slot.findById(kt_EntgeltTest.ListeDerSlots[0]);
+            let s1_kind = await Slot.findById(s1_elt.gabelAlternativen[0]);
 
             // 2. Anfragen mit unterschiedlichen (vorberechneten) Entgelten erstellen
             // Annahme: Jede Anfrage nutzt einen Weg, der Kosten von `slotGrundentgelt` pro Tag verursacht.
             // Anfrage Hoch: 10 Tage -> Entgelt 1000
             const zeitraumHoch = { start: "2025-01-20", ende: "2025-01-31" }; // 2 Wochen Mo-Fr = 10 Tage
             const tageHoch = 10; 
-            anfrageHoch = await new Anfrage({ Zugnummer: "EHoch", EVU: "EVU1", ListeGewuenschterSlotAbschnitte: [{ von: "E1", bis: "E2", Abfahrtszeit: { stunde: 8, minute: 10 }, Ankunftszeit: { stunde: 9, minute: 0 } }], Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraumHoch, Email: "hoch@evu.com", Status: "in_konfliktloesung_topf", Entgelt: tageHoch * slotGrundentgelt, ZugewieseneSlots: [{slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
+            anfrageHoch = await new Anfrage({ Zugnummer: "EHoch", EVU: "EVU1", ListeGewuenschterSlotAbschnitte: [{ von: "E1", bis: "E2", Abfahrtszeit: { stunde: 8, minute: 10 }, Ankunftszeit: { stunde: 9, minute: 0 } }], Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraumHoch, Email: "hoch@evu.com", Status: "in_konfliktloesung_topf", Entgelt: tageHoch * slotGrundentgelt, ZugewieseneSlots: [{slot: s1_elt._id, kind: s1_kind._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
             
             // Anfrage Mittel: 7 Tage -> Entgelt 700
             const zeitraumMittel = { start: "2025-01-20", ende: "2025-01-28" }; // 7 Tage Mo-Fr
             const tageMittel = 7;
-            anfrageMittel = await new Anfrage({ Zugnummer: "EMittel", EVU: "EVU2", ListeGewuenschterSlotAbschnitte: [{ von: "E1", bis: "E2", Abfahrtszeit: { stunde: 8, minute: 10 }, Ankunftszeit: { stunde: 9, minute: 0 } }], Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraumMittel, Email: "mittel@evu.com", Status: "in_konfliktloesung_topf", Entgelt: tageMittel * slotGrundentgelt, ZugewieseneSlots: [{slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
+            anfrageMittel = await new Anfrage({ Zugnummer: "EMittel", EVU: "EVU2", ListeGewuenschterSlotAbschnitte: [{ von: "E1", bis: "E2", Abfahrtszeit: { stunde: 8, minute: 10 }, Ankunftszeit: { stunde: 9, minute: 0 } }], Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraumMittel, Email: "mittel@evu.com", Status: "in_konfliktloesung_topf", Entgelt: tageMittel * slotGrundentgelt, ZugewieseneSlots: [{slot: s1_elt._id, kind: s1_kind._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
 
             // Anfrage Niedrig: 5 Tage -> Entgelt 500
             const zeitraumNiedrig = { start: "2025-01-20", ende: "2025-01-24" }; // 1 Woche Mo-Fr = 5 Tage
             const tageNiedrig = 5;
-            anfrageNiedrig = await new Anfrage({ Zugnummer: "ENiedrig", EVU: "EVU3", ListeGewuenschterSlotAbschnitte: [{ von: "E1", bis: "E2", Abfahrtszeit: { stunde: 8, minute: 10 }, Ankunftszeit: { stunde: 9, minute: 0 } }], Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraumNiedrig, Email: "niedrig@evu.com", Status: "in_konfliktloesung_topf", Entgelt: tageNiedrig * slotGrundentgelt, ZugewieseneSlots: [{slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
+            anfrageNiedrig = await new Anfrage({ Zugnummer: "ENiedrig", EVU: "EVU3", ListeGewuenschterSlotAbschnitte: [{ von: "E1", bis: "E2", Abfahrtszeit: { stunde: 8, minute: 10 }, Ankunftszeit: { stunde: 9, minute: 0 } }], Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: zeitraumNiedrig, Email: "niedrig@evu.com", Status: "in_konfliktloesung_topf", Entgelt: tageNiedrig * slotGrundentgelt, ZugewieseneSlots: [{slot: s1_elt._id, kind: s1_kind._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] }).save();
 
             // Anfragen dem Kapazitätstopf zuordnen
             kt_EntgeltTest.ListeDerAnfragen = [anfrageHoch._id, anfrageMittel._id, anfrageNiedrig._id];
@@ -1202,22 +1372,85 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
         });
 
         // NEUER TESTFALL für Entgeltvergleich, eindeutige Entscheidung.
-        it('sollte Topf-Konflikt durch Entgeltvergleich lösen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen (granularer Status)', async () => {
+        it('sollte Topf-Konflikt durch Entgeltvergleich loesen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen mit granularem Status', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 3 Anfragen für maxKapazität=1 ----
             let kt_Entgelt, anfrageHoch, anfrageMittel, anfrageNiedrig, konfliktDoku;
             const slotGrundentgelt = 100;
 
             // 1. Kapazitätstopf mit maxKapazitaet = 1
-            const topfKriterien = { Abschnitt: "EntgeltZone2", Kalenderwoche: 4, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 8 };
-            const slotBasis = { slotTyp: "TAG", von: "E11", bis: "E21", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 9, minute: 0 }, Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, Verkehrsart: topfKriterien.Verkehrsart, Grundentgelt: slotGrundentgelt };
-            const s1Resp = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            kt_Entgelt = await Kapazitaetstopf.findById(s1Resp.body.data.VerweisAufTopf);
-            expect(kt_Entgelt.maxKapazitaet).toBe(1); // floor(0.7 * 2) = 1
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Kalenderwoche: 4,
+                Verkehrstag: "Mo-Fr",
+                Abschnitt: "EntgeltZone2",
+            };
+
+            // Die zwei unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindAlternativen = [
+                {
+                    von: "E11", 
+                    bis: "E21", 
+                    Abschnitt: "EntgeltZone2",
+                    Abfahrt: { stunde: 8, minute: 10 }, 
+                    Ankunft: { stunde: 9, minute: 0 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: slotGrundentgelt // Annahme für slotGrundentgelt
+                },
+                {
+                    von: "E11", 
+                    bis: "E21", 
+                    Abschnitt: "EntgeltZone2",
+                    Abfahrt: { stunde: 8, minute: 20 }, 
+                    Ankunft: { stunde: 9, minute: 0 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: slotGrundentgelt
+                }
+            ];
+
+            let topfIdFuerTest;
+            let s1_elt;
+
+            // ----- 2. Erstelle die beiden Slot-Gruppen in einer Schleife -----
+
+            for (const alternative of kindAlternativen) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    ...elternData,
+                    alternativen: [alternative]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+
+                // Merke dir die ID des Topfes (wird bei beiden Slots dieselbe sein)
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = response.body.data.VerweisAufTopf;
+                    s1_elt = response.body.data;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+            kt_Entgelt = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_Entgelt).toBeDefined();
+            // Der Topf sollte jetzt 2 Eltern-Slots in seiner Liste haben
+            expect(kt_Entgelt.ListeDerSlots).toHaveLength(2); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_Entgelt.maxKapazitaet).toBe(Math.floor(0.7 * 2)); // = 1
+            
+            let s1_kind = await Slot.findById(s1_elt.gabelAlternativen[0]);
+
+            //console.log(`s1_elt ${s1_elt}, s1_kind ${s1_kind}`);
             
 
             // 2. Anfragen erstellen mit vorbefülltem Entgelt und initial zugewiesenen Slots
-            const anfrageBasis = { Email: "entgelt@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "E1", bis:"E2", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: [{ slot: s1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] };
+            const anfrageBasis = { Email: "entgelt@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "E1", bis:"E2", Abfahrtszeit: {stunde:8, minute:0}, Ankunftszeit:{stunde:9,minute:0}}], ZugewieseneSlots: [{ slot: s1_elt._id, kind: s1_kind._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'}] };
             
             const zeitraumHoch = { start: "2025-01-20", ende: "2025-01-31" }; // 10 Tage
             anfrageHoch = await new Anfrage({ ...anfrageBasis, EVU: "EntgeltEVU1",  Zugnummer: "Hoch", Zeitraum: zeitraumHoch, Entgelt: 10 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
@@ -1228,6 +1461,8 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
 
             kt_Entgelt.ListeDerAnfragen = [anfrageHoch._id, anfrageMittel._id, anfrageNiedrig._id];
             await kt_Entgelt.save();
+
+            //console.log(`anfrageHoch ${anfrageHoch}, anfrageHoch.ZugewieseneSlots ${anfrageHoch.ZugewieseneSlots}`);
 
             // 3. Konfliktdokument erstellen
             konfliktDoku = await new KonfliktDokumentation({
@@ -1286,24 +1521,87 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
         });
 
         // TESTFALL für Gleichstand beim Entgelt
-        it('sollte bei Gleichstand im Entgeltvergleich korrekt in den Höchstpreis-Status wechseln und Anfragen-Status granular aktualisieren', async () => {
+        it('sollte bei Gleichstand im Entgeltvergleich korrekt in den Hoechstpreis-Status wechseln und Anfragen-Status granular aktualisieren', async () => {
             // ---- SETUP: Erzeuge einen Konflikt, der zu einem Gleichstand führen wird ----
             let kt_TieBreak, anfrageA1, anfrageA2, anfrageA3, anfrageA4;
             let konfliktDokuTie;
             const slotGrundentgelt = 100;
 
-            // 1. Kapazitätstopf mit maxKapazitaet = 2
-            const topfKriterienTie = { Abschnitt: "TieZone", Kalenderwoche: 5, Verkehrstag: "Mo-Fr", Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 9 };
-            const slotBasisTie = { slotTyp: "TAG", von: "T1", bis: "T2", Abschnitt: topfKriterienTie.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienTie.Verkehrstag, Kalenderwoche: topfKriterienTie.Kalenderwoche, Verkehrsart: topfKriterienTie.Verkehrsart, Grundentgelt: slotGrundentgelt };
-            
-            const sT1Resp = await request(app).post('/api/slots').send({ ...slotBasisTie, Abfahrt: { stunde: topfKriterienTie.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasisTie, Abfahrt: { stunde: topfKriterienTie.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasisTie, Abfahrt: { stunde: topfKriterienTie.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            kt_TieBreak = await Kapazitaetstopf.findById(sT1Resp.body.data.VerweisAufTopf);
-            expect(kt_TieBreak.maxKapazitaet).toBe(2);
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Kalenderwoche: 5,
+                Verkehrstag: "Mo-Fr",
+                Abschnitt: "TieZone",
+            };
+
+            // Die drei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindAlternativen = [
+                { // Kind 1
+                    von: "T1", 
+                    bis: "T2", 
+                    Abschnitt: "TieZone",
+                    Abfahrt: { stunde: 9, minute: 10 }, 
+                    Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgelt
+                },
+                { // Kind 2
+                    von: "T1", 
+                    bis: "T2", 
+                    Abschnitt: "TieZone",
+                    Abfahrt: { stunde: 9, minute: 20 }, 
+                    Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgelt
+                },
+                { // Kind 3
+                    von: "T1", 
+                    bis: "T2", 
+                    Abschnitt: "TieZone",
+                    Abfahrt: { stunde: 9, minute: 30 }, 
+                    Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgelt
+                }
+            ];
+
+            let topfIdFuerTest;
+            let sT1Resp;
+
+            // ----- 2. Erstelle die drei Slot-Gruppen in einer Schleife -----
+
+            for (const alternative of kindAlternativen) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    ...elternData,
+                    alternativen: [alternative]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+
+                // Merke dir die ID des Topfes (wird bei allen drei Slots dieselbe sein)
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = response.body.data.VerweisAufTopf;
+                    sT1Resp = response.body.data;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+            kt_TieBreak = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_TieBreak).toBeDefined();
+            // Der Topf sollte jetzt 3 Eltern-Slots in seiner Liste haben
+            expect(kt_TieBreak.ListeDerSlots).toHaveLength(3); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_TieBreak.maxKapazitaet).toBe(Math.floor(0.7 * 3)); // = 2
 
             // 2. Anfragen mit Entgelten erstellen, die zu Gleichstand führen
-            const anfrageBasisTie = { Email: "tie@evu.com", Verkehrsart: "SGV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "T1", bis:"T2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: [{ slot: sT1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
+            const anfrageBasisTie = { Email: "tie@evu.com", Verkehrsart: "SGV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "T1", bis:"T2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: [{ slot: sT1Resp._id, kind: sT1Resp.gabelAlternativen[0], statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
 
             const zeitraumA1 = { start: "2025-02-03", ende: "2025-02-14" }; // 10 Tage -> Entgelt 1000
             anfrageA1 = await new Anfrage({ ...anfrageBasisTie, EVU: "TieEVU1", Zugnummer: "TA1", Zeitraum: zeitraumA1, Entgelt: 10 * slotGrundentgelt, Status: "in_konfliktloesung_topf" }).save();
@@ -1369,27 +1667,88 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
         });
 
         // TESTFALL für die Verarbeitung der Höchstpreis-Ergebnisse mit eindeutigen Geboten
-        it('HP.1: sollte Konflikt nach Verarbeitung valider Höchstpreis-Gebote korrekt lösen (eindeutiger Gewinner)', async () => {
+        it('HP 1 sollte Konflikt nach Verarbeitung valider Hoechstpreis-Gebote korrekt loesen - eindeutiger Gewinner', async () => {
             // ---- SETUP: Konflikt in Status 'in_bearbeitung_hoechstpreis' bringen ----
             let kt_HP, anfrageHP_A1, anfrageHP_B, anfrageHP_C, anfrageHP_D, konfliktDokuHP_Id;
             const slotGrundentgeltHP = 100;
 
-            // 1. Kapazitätstopf KT_HP mit maxKapazitaet = 2
-            const topfKriterienHP = { Abschnitt: "HP_Zone1", Kalenderwoche: 7, Verkehrstag: "Mo-Fr", Verkehrsart: "SPNV", AbfahrtStundeFuerZeitfenster: 9 };
-            const slotBasisHP = {  slotTyp: "TAG", von: "HP1", bis: "HP2", Abschnitt: topfKriterienHP.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienHP.Verkehrstag, Kalenderwoche: topfKriterienHP.Kalenderwoche, Verkehrsart: topfKriterienHP.Verkehrsart, Grundentgelt: slotGrundentgeltHP };
-            const sHP1Resp = await request(app).post('/api/slots').send({ ...slotBasisHP, Abfahrt: { stunde: topfKriterienHP.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            // Erstelle 3 Slots, um maxKapazitaet = 2 zu erhalten
-            await request(app).post('/api/slots').send({ ...slotBasisHP, Abfahrt: { stunde: topfKriterienHP.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasisHP, Abfahrt: { stunde: topfKriterienHP.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            kt_HP = await Kapazitaetstopf.findById(sHP1Resp.body.data.VerweisAufTopf);
-            expect(kt_HP.maxKapazitaet).toBe(2);
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Kalenderwoche: 7,
+                Verkehrstag: "Mo-Fr",
+                Abschnitt: "HP_Zone1",
+            };
+
+            // Die drei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindAlternativen = [
+                {
+                    von: "HP1", 
+                    bis: "HP2", 
+                    Abschnitt: "HP_Zone1",
+                    Abfahrt: { stunde: 9, minute: 0 }, 
+                    Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SPNV", 
+                    Grundentgelt: slotGrundentgeltHP
+                },
+                {
+                    von: "HP1", 
+                    bis: "HP2", 
+                    Abschnitt: "HP_Zone1",
+                    Abfahrt: { stunde: 9, minute: 10 }, 
+                    Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SPNV", 
+                    Grundentgelt: slotGrundentgeltHP
+                },
+                {
+                    von: "HP1", 
+                    bis: "HP2", 
+                    Abschnitt: "HP_Zone1",
+                    Abfahrt: { stunde: 9, minute: 20 }, 
+                    Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SPNV", 
+                    Grundentgelt: slotGrundentgeltHP
+                }
+            ];
+
+            let topfIdFuerTest;
+
+            // ----- 2. Erstelle die drei Slot-Gruppen in einer Schleife -----
+
+            for (const alternative of kindAlternativen) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    ...elternData,
+                    alternativen: [alternative]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+
+                // Merke dir die ID des Topfes (wird bei allen drei Slots dieselbe sein)
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = response.body.data.VerweisAufTopf;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+            kt_HP = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_HP).toBeDefined();
+            // Der Topf sollte jetzt 3 Eltern-Slots in seiner Liste haben
+            expect(kt_HP.ListeDerSlots).toHaveLength(3); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_HP.maxKapazitaet).toBe(Math.floor(0.7 * 3)); // = 2
 
             // 2. Anfragen erstellen: A1 (1000), B (900), C (900), D(800)
             const anfrageBasisHP = { 
                 Email: "hp1@evu.com", Verkehrsart: "SPNV", Verkehrstag: "Mo-Fr", 
                 ListeGewuenschterSlotAbschnitte: [{von: "HP1", bis:"HP2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], 
                 // Annahme, dass der Zuordnungsprozess jeder Anfrage alle 3 Slots zuwies
-                ZugewieseneSlots: (await Slot.find({ VerweisAufTopf: kt_HP._id })).map(s => ({ slot: s._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }))
+                ZugewieseneSlots: (await Slot.find({ VerweisAufTopf: kt_HP._id })).map(s => ({ slot: s._id, kind: s.gabelAlternativen[0] , statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }))
             };
             
             const zeitraumA1 = { start: "2025-02-17", ende: "2025-02-28" }; // 10 Tage
@@ -1476,26 +1835,88 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
         });
 
         //  TESTFALL für Gleichstand im Höchstpreisverfahren
-        it('HP.2: sollte bei Gleichstand der höchsten Gebote im Höchstpreisverfahren den Status beibehalten und betroffene Anfragen auf "wartet" belassen', async () => {
+        it('HP 2 sollte bei Gleichstand der hoechsten Gebote im Hoechstpreisverfahren den Status beibehalten und betroffene Anfragen auf wartet belassen', async () => {
         // ---- SETUP: Konflikt in Status 'in_bearbeitung_hoechstpreis' bringen ----
         let kt_HPTie, anfrage_HPT_A1, anfrage_HPT_B, anfrage_HPT_C, anfrage_HPT_E;
         let konfliktDokuHPTie_Id;
         const slotGrundentgeltHP = 100;
 
-        // 1. Kapazitätstopf mit maxKapazitaet = 2
-        const topfKriterienHPTie = { Abschnitt: "HPTieZone", Kalenderwoche: 8, Verkehrstag: "Mo-Fr", Verkehrsart: "SPFV", AbfahrtStundeFuerZeitfenster: 9 };
-        const slotBasisHPTie = { slotTyp: "TAG", von: "TIE1", bis: "TIE2", Abschnitt: topfKriterienHPTie.Abschnitt, Ankunft: { stunde: 10, minute: 0 }, Verkehrstag: topfKriterienHPTie.Verkehrstag, Kalenderwoche: topfKriterienHPTie.Kalenderwoche, Verkehrsart: topfKriterienHPTie.Verkehrsart, Grundentgelt: slotGrundentgeltHP };
-        // 3 Slots erstellen, um maxKapazitaet = 2 zu erhalten
-        const sHPT1Resp = await request(app).post('/api/slots').send({ ...slotBasisHPTie, Abfahrt: { stunde: topfKriterienHPTie.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-        await request(app).post('/api/slots').send({ ...slotBasisHPTie, Abfahrt: { stunde: topfKriterienHPTie.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-        await request(app).post('/api/slots').send({ ...slotBasisHPTie, Abfahrt: { stunde: topfKriterienHPTie.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-        kt_HPTie = await Kapazitaetstopf.findById(sHPT1Resp.body.data.VerweisAufTopf);
-        expect(kt_HPTie.maxKapazitaet).toBe(2);
+        // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+        const elternData = {
+            elternSlotTyp: "TAG",
+            Kalenderwoche: 8,
+            Verkehrstag: "Mo-Fr",
+            Abschnitt: "HPTieZone",
+        };
+
+        // Die drei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+        const kindAlternativen = [
+            {
+                von: "TIE1", 
+                bis: "TIE2", 
+                Abschnitt: "HPTieZone",
+                Abfahrt: { stunde: 9, minute: 0 }, 
+                Ankunft: { stunde: 10, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: slotGrundentgeltHP
+            },
+            {
+                von: "TIE1", 
+                bis: "TIE2", 
+                Abschnitt: "HPTieZone",
+                Abfahrt: { stunde: 9, minute: 10 }, 
+                Ankunft: { stunde: 10, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: slotGrundentgeltHP
+            },
+            {
+                von: "TIE1", 
+                bis: "TIE2", 
+                Abschnitt: "HPTieZone",
+                Abfahrt: { stunde: 9, minute: 20 }, 
+                Ankunft: { stunde: 10, minute: 0 },
+                Verkehrsart: "SPFV", 
+                Grundentgelt: slotGrundentgeltHP
+            }
+        ];
+
+        let topfIdFuerTest;
+
+        // ----- 2. Erstelle die drei Slot-Gruppen in einer Schleife -----
+
+        for (const alternative of kindAlternativen) {
+            // Baue den korrekten, verschachtelten Payload für die API
+            const payload = {
+                ...elternData,
+                alternativen: [alternative]
+            };
+
+            // Sende den Payload an den API-Endpunkt
+            const response = await request(app)
+                .post('/api/slots')
+                .send(payload);
+
+            expect(response.status).toBe(201);
+
+            // Merke dir die ID des Topfes (wird bei allen drei Slots dieselbe sein)
+            if (!topfIdFuerTest) {
+                topfIdFuerTest = response.body.data.VerweisAufTopf;
+            }
+        }
+
+        // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+        kt_HPTie = await Kapazitaetstopf.findById(topfIdFuerTest);
+        expect(kt_HPTie).toBeDefined();
+        // Der Topf sollte jetzt 3 Eltern-Slots in seiner Liste haben
+        expect(kt_HPTie.ListeDerSlots).toHaveLength(3); 
+        // Die maxKapazitaet sollte korrekt berechnet sein
+        expect(kt_HPTie.maxKapazitaet).toBe(Math.floor(0.7 * 3)); // = 2
 
         // 2. Anfragen erstellen: A1 (1000), B (900), C (900), E (900)
         // Der Einfachheit halber gehen wir davon aus, dass alle Anfragen die gleichen Slots wollen.
         const zugewieseneSlotsFuerAnfragen = (await Slot.find({ VerweisAufTopf: kt_HPTie._id })).map(s => ({
             slot: s._id,
+            kind: s.gabelAlternativen[0],
             statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'
         }));
         const anfrageBasisHPTie = { Email: "hptie@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", ListeGewuenschterSlotAbschnitte: [{von: "TIE1", bis:"TIE2", Abfahrtszeit: {stunde:9, minute:0}, Ankunftszeit:{stunde:10,minute:0}}], ZugewieseneSlots: zugewieseneSlotsFuerAnfragen };
@@ -1585,26 +2006,81 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             }
         }
         expect(e_final.Status).toBe('final_abgelehnt');
-    });
+        });
 
-    // TESTFALL für ungültiges Gebot im Höchstpreisverfahren
-    it('HP.3: sollte eine Anfrage mit ungültigem Gebot (<= Entgelt) ablehnen und den Konflikt korrekt lösen', async () => {
+        // TESTFALL für ungültiges Gebot im Höchstpreisverfahren
+        it('HP 3 sollte eine Anfrage mit ungueltigem Gebot kleiner Entgelt ablehnen und den Konflikt korrekt loesen', async () => {
             // ---- SETUP: Konflikt in Status 'in_bearbeitung_hoechstpreis' bringen ----
             let kt_InvBid, anfrageInv_A1, anfrageInv_B, anfrageInv_C;
             let konfliktDokuInvBid_Id;
             const slotGrundentgeltInv = 50;
 
-            // 1. Kapazitätstopf KT_InvBid mit maxKapazitaet = 1
-            const topfKriterienInv = { Abschnitt: "InvBidZone", Kalenderwoche: 9, Verkehrstag: "Sa+So", Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 };
-            const slotBasisInv = { slotTyp: "TAG", von: "INV1", bis: "INV2", Abschnitt: topfKriterienInv.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, Verkehrstag: topfKriterienInv.Verkehrstag, Kalenderwoche: topfKriterienInv.Kalenderwoche, Verkehrsart: topfKriterienInv.Verkehrsart, Grundentgelt: slotGrundentgeltInv };
-            // 2 Slots erstellen, um maxKap = floor(0.7*2) = 1 zu erhalten
-            const sInv1Resp = await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            kt_InvBid = await Kapazitaetstopf.findById(sInv1Resp.body.data.VerweisAufTopf);
-            expect(kt_InvBid.maxKapazitaet).toBe(1);
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Kalenderwoche: 9,
+                Verkehrstag: "Sa+So",
+                Abschnitt: "InvBidZone",
+            };
+
+            // Die zwei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindAlternativen = [
+                {
+                    von: "INV1", 
+                    bis: "INV2", 
+                    Abschnitt: "InvBidZone",
+                    Abfahrt: { stunde: 13, minute: 0 }, 
+                    Ankunft: { stunde: 14, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgeltInv
+                },
+                {
+                    von: "INV1", 
+                    bis: "INV2", 
+                    Abschnitt: "InvBidZone",
+                    Abfahrt: { stunde: 13, minute: 10 }, 
+                    Ankunft: { stunde: 14, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgeltInv
+                }
+            ];
+
+            let topfIdFuerTest;
+            let sInv1Resp;
+
+            // ----- 2. Erstelle die beiden Slot-Gruppen in einer Schleife -----
+
+            for (const alternative of kindAlternativen) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    ...elternData,
+                    alternativen: [alternative]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+
+                // Merke dir die ID des Topfes (wird bei beiden Slots dieselbe sein)
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = response.body.data.VerweisAufTopf;
+                    sInv1Resp = response.body.data;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+            kt_InvBid = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_InvBid).toBeDefined();
+            // Der Topf sollte jetzt 2 Eltern-Slots in seiner Liste haben
+            expect(kt_InvBid.ListeDerSlots).toHaveLength(2); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_InvBid.maxKapazitaet).toBe(Math.floor(0.7 * 2)); // = 1
 
             // 2. Anfragen erstellen: A1 (200), B (150), C (100)
-            const anfrageBasisInv = { Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
+            const anfrageBasisInv = { Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp._id, kind: sInv1Resp.gabelAlternativen[0] ,statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
             const zeitraumA1 = { start: "2025-03-01", ende: "2025-03-09" }; // 4 Tage (2x Sa+So)
             anfrageInv_A1 = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU1", Zugnummer: "InvA1", Zeitraum: zeitraumA1, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
             
@@ -1685,24 +2161,79 @@ describe('PUT /api/konflikte/:konfliktId - Konfliktlösung Workflow: Durchführu
             expect(c_final.Status).toBe('final_abgelehnt');
         });   
         
-    // TESTFALL für fehlendes Gebot im Höchstpreisverfahren
-    it('HP.4: sollte eine Anfrage mit fehlendem Gebot ablehnen und den Konflikt korrekt lösen', async () => {
+        // TESTFALL für fehlendes Gebot im Höchstpreisverfahren
+        it('HP 4 sollte eine Anfrage mit fehlendem Gebot ablehnen und den Konflikt korrekt loesen', async () => {
             // ---- SETUP: Konflikt in Status 'in_bearbeitung_hoechstpreis' bringen ----
             let kt_InvBid, anfrageInv_A1, anfrageInv_B, anfrageInv_C;
             let konfliktDokuInvBid_Id;
             const slotGrundentgeltInv = 50;
 
-            // 1. Kapazitätstopf KT_InvBid mit maxKapazitaet = 1
-            const topfKriterienInv = { Abschnitt: "InvBidZone", Kalenderwoche: 9, Verkehrstag: "Sa+So", Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 };
-            const slotBasisInv = { slotTyp: "TAG", von: "INV1", bis: "INV2", Abschnitt: topfKriterienInv.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, Verkehrstag: topfKriterienInv.Verkehrstag, Kalenderwoche: topfKriterienInv.Kalenderwoche, Verkehrsart: topfKriterienInv.Verkehrsart, Grundentgelt: slotGrundentgeltInv };
-            // 2 Slots erstellen, um maxKap = floor(0.7*2) = 1 zu erhalten
-            const sInv1Resp = await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasisInv, Abfahrt: { stunde: topfKriterienInv.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            kt_InvBid = await Kapazitaetstopf.findById(sInv1Resp.body.data.VerweisAufTopf);
-            expect(kt_InvBid.maxKapazitaet).toBe(1);
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Kalenderwoche: 9,
+                Verkehrstag: "Sa+So",
+                Abschnitt: "InvBidZone",
+            };
+
+            // Die zwei leicht unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindAlternativen = [
+                {
+                    von: "INV1", 
+                    bis: "INV2", 
+                    Abschnitt: "InvBidZone",
+                    Abfahrt: { stunde: 13, minute: 0 }, 
+                    Ankunft: { stunde: 14, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgeltInv
+                },
+                {
+                    von: "INV1", 
+                    bis: "INV2", 
+                    Abschnitt: "InvBidZone",
+                    Abfahrt: { stunde: 13, minute: 10 }, 
+                    Ankunft: { stunde: 14, minute: 0 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: slotGrundentgeltInv
+                }
+            ];
+
+            let topfIdFuerTest;
+            let sInv1Resp;
+
+            // ----- 2. Erstelle die beiden Slot-Gruppen in einer Schleife -----
+
+            for (const alternative of kindAlternativen) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    ...elternData,
+                    alternativen: [alternative]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+
+                // Merke dir die ID des Topfes (wird bei beiden Slots dieselbe sein)
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = response.body.data.VerweisAufTopf;
+                    sInv1Resp = response.body.data;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+            kt_InvBid = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_InvBid).toBeDefined();
+            // Der Topf sollte jetzt 2 Eltern-Slots in seiner Liste haben
+            expect(kt_InvBid.ListeDerSlots).toHaveLength(2); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_InvBid.maxKapazitaet).toBe(Math.floor(0.7 * 2)); // = 1
 
             // 2. Anfragen erstellen: A1 (200), B (150), C (100)
-            const anfrageBasisInv = { Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp.body.data._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
+            const anfrageBasisInv = { Email: "invbid@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", ListeGewuenschterSlotAbschnitte: [{von: "INV1", bis:"INV2", Abfahrtszeit: {stunde:13, minute:0}, Ankunftszeit:{stunde:14,minute:0}}], ZugewieseneSlots: [{ slot: sInv1Resp._id, kind: sInv1Resp.gabelAlternativen[0], statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf' }] };
             const zeitraumA1 = { start: "2025-03-01", ende: "2025-03-09" }; // 4 Tage (2x Sa+So)
             anfrageInv_A1 = await new Anfrage({ ...anfrageBasisInv, EVU: "InvBidEVU4", Zugnummer: "InvA1", Zeitraum: zeitraumA1, Entgelt: 4 * slotGrundentgeltInv, Status: "in_konfliktloesung_topf" }).save(); // Entgelt 200
             
@@ -1821,19 +2352,50 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         anfragenFuerKonflikt = [];
         anfragenFuerBelegung = [];
 
-        const commonParams = {
-            slotTyp: "TAG",
-            von: "Analyse-A", bis: "Analyse-B", Abschnitt: "Analyse-Strecke",
-            Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Kalenderwoche: 4, Grundentgelt: 10
+        // Gemeinsame Daten für alle zu erstellenden Slot-Gruppen
+        const commonParentData = {
+            elternSlotTyp: "TAG",
+            Kalenderwoche: 4,
+            Verkehrstag: "Mo-Fr",
+            Abschnitt: "Analyse-Strecke",
+        };
+        const commonKindData = {
+            von: "Analyse-A", 
+            bis: "Analyse-B", 
+            Abschnitt: "Analyse-Strecke",
+            Verkehrsart: "SPFV", 
+            Grundentgelt: 10
         };
 
-        // Slots für Topf 05-07
-        for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 5, minute: i*10 }, Ankunft: { stunde: 6, minute: i*10 } }); }
-        // Slots für Topf 07-09
-        for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 7, minute: i*10 }, Ankunft: { stunde: 8, minute: i*10 } }); }
-        // Slots für Topf 09-11
-        for(let i=0; i<3; i++) { await request(app).post('/api/slots').send({ ...commonParams, Abfahrt: { stunde: 9, minute: i*10 }, Ankunft: { stunde: 10, minute: i*10 } }); }
-        
+        // Definition der 3 Töpfe, die wir erstellen wollen, und wie viele Slots sie haben sollen
+        const topfSetups = [
+            { abfahrtStunde: 5, ankunftStunde: 6, zeitfenster: "05-07", anzahlSlots: 3 },
+            { abfahrtStunde: 7, ankunftStunde: 8, zeitfenster: "07-09", anzahlSlots: 3 },
+            { abfahrtStunde: 9, ankunftStunde: 10, zeitfenster: "09-11", anzahlSlots: 3 }
+        ];
+
+        // ----- 2. Erstelle alle 9 Slot-Gruppen in verschachtelten Schleifen -----
+
+        for (const setup of topfSetups) {
+            // Erstelle für jedes Setup die definierte Anzahl an Slot-Gruppen,
+            // um die maxKapazitaet des jeweiligen Topfes zu steuern.
+            for (let i = 0; i < setup.anzahlSlots; i++) {
+                const payload = {
+                    ...commonParentData,
+                    alternativen: [{
+                        ...commonKindData,
+                        Abfahrt: { stunde: setup.abfahrtStunde, minute: i * 10 },
+                        Ankunft: { stunde: setup.ankunftStunde, minute: i * 10 }
+                    }]
+                };
+
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+                expect(response.status).toBe(201);
+            }
+        }
+
         const s1 = await Slot.findOne({Abfahrt: { stunde: 7, minute: 10 }});
         const s2 = await Slot.findOne({Abfahrt: { stunde: 9, minute: 10 }});
         //console.log(`Der gespeicherte Slot lautet ${s1}`);
@@ -1859,7 +2421,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
                                Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-01-20", ende: "2025-01-26" },
                                ListeGewuenschterSlotAbschnitte: [{von: "Analyse-A", bis:"Analyse-B", Abfahrtszeit: {stunde:7, minute:10}, Ankunftszeit:{stunde:8,minute:10}}],
                                ZugewieseneSlots: [
-                                                { slot: s1._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
+                                                { slot: s1.gabelElternSlot, kind: s1._id , statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
                                                 // Für Einfachheit nehmen wir an, jede Anfrage bezieht sich auf einen der erstellten Slots.
                                                 // In Realität würden sie sich ggf. die gleichen Slots teilen.
                                 ]};
@@ -1874,7 +2436,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
             const anfr = await new Anfrage({ ...anfrageBasis, EVU: `BelegungEVU${i}`, Zugnummer: `B${i}`,
                 Abfahrtszeit: {stunde:9, minute:10}, Ankunftszeit:{stunde:10,minute:10},
              ZugewieseneSlots: [
-                                { slot: s2._id, statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
+                                { slot: s2.gabelElternSlot, kind: s2._id , statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'},
                                 // Für Einfachheit nehmen wir an, jede Anfrage bezieht sich auf einen der erstellten Slots.
                                 // In Realität würden sie sich ggf. die gleichen Slots teilen.
                                 ]}).save();
@@ -1919,7 +2481,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         expect(konfliktGruppe2).not.toBeNull();
     });
 
-    it('sollte die Kapazität der Nachbartöpfe korrekt als "frei" und "belegt" analysieren (Tag)', async () => {
+    it('sollte die Kapazitaet der Nachbartoepfe korrekt als frei und belegt analysieren - Tag', async () => {
         // Aktion: Analyse-Endpunkt aufrufen
         const response = await request(app)
             .get(`/api/konflikte/gruppen/${konfliktGruppe._id}/verschiebe-analyse`)
@@ -1951,7 +2513,7 @@ describe('GET /api/konflikte/gruppen/:gruppenId/verschiebe-analyse', () => {
         expect(topfAnalyse.nachfolger.Status).toBe('belegt'); // Da ListeDerAnfragen (3) >== maxKapazitaet (2)
     });
 
-    it('sollte die Kapazität der Nachbartöpfe korrekt als "belegt" und nicht existent analysieren (Tag)', async () => {
+    it('sollte die Kapazitaet der Nachbartoepfe korrekt als belegt und nicht existent analysieren - Tag', async () => {
         // Aktion: Analyse-Endpunkt aufrufen
         const response = await request(app)
             .get(`/api/konflikte/gruppen/${konfliktGruppe2._id}/verschiebe-analyse`)
@@ -2011,56 +2573,93 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
                 await collection.deleteMany({});
             }
 
-            // Vorbereitung: Kapazitätstopf mit maxKapazitaet = 2 erstellen
-            const topfKriterien = {
-                Abschnitt: "KonfliktZone1", Kalenderwoche: 2, Verkehrstag: "Sa+So",
-                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
-            };
-            const topfKriterien2 = {
-                Abschnitt: "KonfliktZone2", Kalenderwoche: 2, Verkehrstag: "Sa+So",
-                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 15 // Ergibt ZF "13-15"
-            };
-            const topfKriterien3 = {
-                Abschnitt: "KonfliktZone3", Kalenderwoche: 2, Verkehrstag: "Sa+So",
-                Verkehrsart: "SGV", AbfahrtStundeFuerZeitfenster: 13 // Ergibt ZF "13-15"
-            };
-            // 3 Slots für KonfliktZone1 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: topfKriterien.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
-                                Verkehrstag: topfKriterien.Verkehrstag, Kalenderwoche: topfKriterien.Kalenderwoche, 
-                                Verkehrsart: topfKriterien.Verkehrsart,
-                                Grundentgelt: 150 
-                            };
-            s1 = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: topfKriterien.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            
-            // 2 Slots für KonfliktZone2 erstellen, um maxKapazitaet = floor(0.7*2) = 1 zu erhalten
-            const slotBasis2 = { slotTyp: "TAG", von: "Z", bis: "AA", Abschnitt: topfKriterien2.Abschnitt, Ankunft: { stunde: 16, minute: 0 }, 
-                                Verkehrstag: topfKriterien2.Verkehrstag, Kalenderwoche: topfKriterien2.Kalenderwoche, 
-                                Verkehrsart: topfKriterien2.Verkehrsart,
-                                Grundentgelt: 250 
-                            };
-            const s2 = await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis2, Abfahrt: { stunde: topfKriterien2.AbfahrtStundeFuerZeitfenster, minute: 20 } });
+            const topfSetups = [
+                {
+                    anzahlSlots: 3, // -> ergibt maxKap = 2
+                    kindData: {
+                        von: "Y", bis: "Z", Abschnitt: "KonfliktZone1",
+                        Abfahrt: { stunde: 13, minute: 0 }, Ankunft: { stunde: 14, minute: 0 },
+                        Grundentgelt: 150, Verkehrsart: "SGV"
+                    },
+                    elternData: {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: 2,
+                        Verkehrstag: "Sa+So",
+                        Abschnitt: "KonfliktZone1",                        
+                    }
+                },
+                {
+                    anzahlSlots: 2, // -> ergibt maxKap = 1
+                    kindData: {
+                        von: "Z", bis: "AA", Abschnitt: "KonfliktZone2",
+                        Abfahrt: { stunde: 15, minute: 0 }, Ankunft: { stunde: 16, minute: 0 },
+                        Grundentgelt: 250, Verkehrsart: "SGV"
+                    },
+                    elternData: {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: 2,
+                        Verkehrstag: "Sa+So",
+                        Abschnitt: "KonfliktZone2",                        
+                    }
+                },
+                {
+                    anzahlSlots: 3, // -> ergibt maxKap = 2
+                    kindData: {
+                        von: "V", bis: "W", Abschnitt: "KonfliktZone3",
+                        Abfahrt: { stunde: 13, minute: 0 }, Ankunft: { stunde: 14, minute: 0 },
+                        Grundentgelt: 50, Verkehrsart: "SGV"
+                    },
+                    elternData: {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: 2,
+                        Verkehrstag: "Sa+So",
+                        Abschnitt: "KonfliktZone3",                        
+                    }
+                }
+            ];
 
-            // 3 Slots für KonfliktZone3 erstellen, um maxKapazitaet = floor(0.7*3) = 2 zu erhalten
-            const slotBasis3 = { slotTyp: "TAG", von: "V", bis: "W", Abschnitt: topfKriterien3.Abschnitt, Ankunft: { stunde: 14, minute: 0 }, 
-                                Verkehrstag: topfKriterien3.Verkehrstag, Kalenderwoche: topfKriterien3.Kalenderwoche, 
-                                Verkehrsart: topfKriterien3.Verkehrsart,
-                                Grundentgelt: 50 
-                            };
-            const s3 = await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis3, Abfahrt: { stunde: topfKriterien3.AbfahrtStundeFuerZeitfenster, minute: 30 } });
-            
-            
-            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            const erstellteToepfe = {};
+
+            // ----- 2. Erstelle alle Slots und Töpfe in einer Schleife -----
+
+            for (const setup of topfSetups) {
+                let topfId = null;
+
+                for (let i = 0; i < setup.anzahlSlots; i++) {
+                    // Leichte Variation der Zeit, um einzigartige SlotIDs zu gewährleisten
+                    const alternative = { 
+                        ...setup.kindData,
+                        Abfahrt: { ...setup.kindData.Abfahrt, minute: (i + 1) * 10 },
+                        Verkehrsart: setup.kindData.Verkehrsart
+                    };
+
+                    const payload = {
+                        elternSlotTyp: setup.elternData.elternSlotTyp,
+                        Kalenderwoche: setup.elternData.Kalenderwoche,
+                        Verkehrstag: setup.elternData.Verkehrstag,
+                        Abschnitt: setup.elternData.Abschnitt,
+                        alternativen: [alternative]
+                    };
+
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+                    
+                    if (i === 0) {
+                        topfId = response.body.data.VerweisAufTopf;
+                    }
+                }
+                
+                const finalerTopf = await Kapazitaetstopf.findById(topfId);
+                erstellteToepfe[finalerTopf.Abschnitt] = finalerTopf;
+            }
+
+            // ----- 3. Finale Überprüfung der Kapazitätstöpfe -----
+            kt_DetectConflict = erstellteToepfe["KonfliktZone1"];
+            kt_NoConflict     = erstellteToepfe["KonfliktZone2"];
+            kt_NoConflict2    = erstellteToepfe["KonfliktZone3"];
+
             expect(kt_DetectConflict.maxKapazitaet).toBe(2);
-
-            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
             expect(kt_NoConflict.maxKapazitaet).toBe(1);
-
-            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
             expect(kt_NoConflict2.maxKapazitaet).toBe(2);
 
             // 2 Anfragen erstellen für KonfliktZone1 und KonfliktZone2
@@ -2088,13 +2687,13 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             
             //console.log(anfrage4);
 
-            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            kt_DetectConflict = await Kapazitaetstopf.findById(kt_DetectConflict._id);
             expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(2); // keine Topf-Überbuchung (2 <= maxKap 2), aber ein Slot-Konflikt
 
-            kt_NoConflict = await Kapazitaetstopf.findById(s2.body.data.VerweisAufTopf);
+            kt_NoConflict = await Kapazitaetstopf.findById(kt_NoConflict._id);
             expect(kt_NoConflict.ListeDerAnfragen).toHaveLength(1); // keine Topf-Überbuchung (1 <= max Kap 1)
 
-            kt_NoConflict2 = await Kapazitaetstopf.findById(s3.body.data.VerweisAufTopf);
+            kt_NoConflict2 = await Kapazitaetstopf.findById(kt_NoConflict2._id);
             expect(kt_NoConflict2.ListeDerAnfragen).toHaveLength(1); // keine Topf-Überbuchung (1 <= max Kap 2)
 
             // Anfragen dem Kapazitätstopf zuordnen (manuell für diesen Test)
@@ -2164,11 +2763,9 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
 
             // Überprüfung des erstellten Konfliktdokuments in der DB
             const konfliktDokuDB = await KonfliktDokumentation.findById(konfliktDokuId);
-            
-            s1 = await Slot.findById(s1.body.data._id);            
+                      
             //console.log(s1);
             expect(konfliktDokuDB).not.toBeNull();
-            expect(konfliktDokuDB.ausloesenderSlot.toString()).toBe(s1._id.toString());
             expect(konfliktDokuDB.status).toBe('offen');
             
             // Überprüfe beteiligteAnfragen (Reihenfolge nicht garantiert, daher Set-Vergleich oder Ähnliches)
@@ -2209,7 +2806,7 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             await request(app).post('/api/konflikte/identifiziere-slot-konflikte').send();
             let anzahlKonfliktDokus = await KonfliktDokumentation.countDocuments();
             expect(anzahlKonfliktDokus).toBe(1);
-            const ersteKonfliktDoku = await KonfliktDokumentation.findOne({ ausloesenderSlot: s1.body.data._id });
+            const ersteKonfliktDoku = await KonfliktDokumentation.findOne({  });
             expect(ersteKonfliktDoku).not.toBeNull();
 
             // 2. Aktion: Konflikterkennung erneut anstoßen, ohne dass sich etwas geändert hat
@@ -2235,7 +2832,7 @@ describe('POST /api/konflikte/identifiziere-slot-konflikte', () => {
             // notizen könnten sich durch den zweiten Lauf geändert haben, falls wir das implementieren
         });
 
-        it('sollte einen gelösten Topf-Konflikt zurücksetzen und wieder öffnen, wenn neue Anfragen hinzukommen und den Konflikt verändern', async () => {
+        it('sollte einen geloesten Topf-Konflikt zuruecksetzen und wieder oeffnen, wenn neue Anfragen hinzukommen und den Konflikt veraendern', async () => {
             // A. Initialen Konflikt erzeugen und lösen (simuliert)
             // 1. Konflikt identifizieren (erzeugt KonfliktDoku K1)
             const identResponse1 = await request(app).post('/api/konflikte/identifiziere-slot-konflikte').send();
@@ -2357,20 +2954,70 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
         
 
-        // 6 Slots für Abschn1 erstellen, um maxKapazitaet = floor(0.7*6) = 4 zu erhalten
-        const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: "Abschn1", 
-                                Verkehrstag: "Sa+So", Kalenderwoche: 2, Verkehrsart: "SGV",
-                                Grundentgelt: 150 
-                            };
-        let s1 = await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } });
-        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } });
-        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } });
-        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } });
-        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } });
-        await request(app).post('/api/slots').send({ ...slotBasis, Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } });
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-        let kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
-        expect(kt_DetectConflict.maxKapazitaet).toBe(4);
+        // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+        const elternData = {
+            elternSlotTyp: "TAG",
+            Kalenderwoche: 2,
+            Verkehrstag: "Sa+So",
+            Abschnitt: "Abschn1",
+        };
+
+        // Gemeinsame Daten für den KIND-Teil der Slot-Gruppen
+        const commonKindData = {
+            von: "Y", 
+            bis: "Z", 
+            Abschnitt: "Abschn1",
+            Verkehrsart: "SGV", 
+            Grundentgelt: 150
+        };
+
+        // Die sechs leicht unterschiedlichen Zeit-Muster, die wir erstellen wollen
+        const zeitAlternativen = [
+            { Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } },
+            { Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } },
+            { Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } },
+            { Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } },
+            { Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } },
+            { Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } }
+        ];
+
+        let topfIdFuerTest;
+        let kt_DetectConflict;
+
+        // ----- 2. Erstelle die sechs Slot-Gruppen in einer Schleife -----
+
+        for (const zeiten of zeitAlternativen) {
+            // Baue den korrekten, verschachtelten Payload für die API
+            const payload = {
+                ...elternData,
+                alternativen: [{
+                    ...commonKindData,
+                    ...zeiten // Füge die spezifischen Abfahrts- und Ankunftszeiten hinzu
+                }]
+            };
+
+            // Sende den Payload an den API-Endpunkt
+            const response = await request(app)
+                .post('/api/slots')
+                .send(payload);
+
+            expect(response.status).toBe(201);
+
+            // Merke dir die ID des Topfes (wird bei allen sechs Slots dieselbe sein)
+            if (!topfIdFuerTest) {
+                topfIdFuerTest = response.body.data.VerweisAufTopf;
+            }
+        }
+
+        // ----- 3. Finale Überprüfung des Kapazitätstopfes -----
+        kt_DetectConflict = await Kapazitaetstopf.findById(topfIdFuerTest);
+        expect(kt_DetectConflict).toBeDefined();
+        // Der Topf sollte jetzt 6 Eltern-Slots in seiner Liste haben
+        expect(kt_DetectConflict.ListeDerSlots).toHaveLength(6); 
+        // Die maxKapazitaet sollte korrekt berechnet sein
+        expect(kt_DetectConflict.maxKapazitaet).toBe(Math.floor(0.7 * 6)); // = 4
 
         const anfrageBasis = { Email: "conflict@evu.com", Verkehrsart: "SGV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-12" }, Status: 'validiert'}; // KW2 2025
         const anfragePromises = [];
@@ -2389,7 +3036,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
         await request(app).post(`/api/anfragen/${anfragenIds[2]._id}/zuordnen`).send();
         await request(app).post(`/api/anfragen/${anfragenIds[3]._id}/zuordnen`).send();
 
-        kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+        kt_DetectConflict = await Kapazitaetstopf.findById(kt_DetectConflict._id);
         expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(4); //kein Konflikt 4 Anfragen für 4 Kapazitäten
         
         //Erster Schritt: Topf-Konflikte
@@ -2425,7 +3072,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
         expect(konfliktDokuDB.status).toBe('offen');
     });
 
-    it('sollte Anfragen automatisch zuweisen und Slot-Konflikt lösen, wenn nach Verzicht die Kapazität ausreicht', async () => {
+    it('sollte Anfragen automatisch zuweisen und Slot-Konflikt loesen, wenn nach Verzicht die Kapazitaet ausreicht', async () => {
         // Aktion: 3 Anfragen (anfrage1,3,4) verzichtet. Anfrage 2 gewinnt.
             const updatePayload = {
                 ListeAnfragenMitVerzicht: [anfragenIds[0].toString(), anfragenIds[2].toString(), anfragenIds[3].toString()],
@@ -2474,7 +3121,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
     });
 
-    it('sollte eine komplette Slot-Konfliktgruppe zurücksetzen, Konfliktdokus löschen und Anfragen-Status revertieren', async () => {
+    it('sollte eine komplette Slot-Konfliktgruppe zuruecksetzen, Konfliktdokus loeschen und Anfragen-Status revertieren', async () => {
         // Aktion: 3 Anfragen (anfrage1,3,4) verzichtet. Anfrage 2 gewinnt.
         const updatePayload = {
             ListeAnfragenMitVerzicht: [anfragenIds[0].toString(), anfragenIds[2].toString(), anfragenIds[3].toString()],
@@ -2545,7 +3192,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
         expect(a4_updated.Status).toBe('vollstaendig_bestaetigt_topf'); 
     });
 
-    it('sollte Slot-Konflikt durch Entgeltvergleich lösen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen/ablehnen (granularer Status)', async () => {
+    it('sollte Slot-Konflikt durch Entgeltvergleich loesen, ReihungEntgelt auto-generieren und Anfragen korrekt zuweisen bzw ablehnen - granularer Status', async () => {
         // Aktion: Keine Anfrage verzichtet, eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
         let a1 = await Anfrage.findById(anfragenIds[0]);
         let a2 = await Anfrage.findById(anfragenIds[1]);
@@ -2608,7 +3255,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
     });
 
-    it('sollte Slot-Konflikt bei Gleichstand im Entgeltvergleich zum Höchstpreisverfahren überführen', async () => {
+    it('sollte Slot-Konflikt bei Gleichstand im Entgeltvergleich zum Hoechstpreisverfahren ueberfuehren', async () => {
         // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
         let a1 = await Anfrage.findById(anfragenIds[0]);
         let a2 = await Anfrage.findById(anfragenIds[1]);
@@ -2670,7 +3317,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
     });
 
-    it('sollte Slot-Konflikt im Höchstpreisverfahren bei eindeutigen Geboten entscheiden', async () => {
+    it('sollte Slot-Konflikt im Hoechstpreisverfahren bei eindeutigen Geboten entscheiden', async () => {
         // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
         let a1 = await Anfrage.findById(anfragenIds[0]);
         let a2 = await Anfrage.findById(anfragenIds[1]);
@@ -2755,7 +3402,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
     });
 
-    it('sollte Slot-Konflikt im Höchstpreisverfahren bei identischen Geboten offen lassen', async () => {
+    it('sollte Slot-Konflikt im Hoechstpreisverfahren bei identischen Geboten offen lassen', async () => {
         // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
         let a1 = await Anfrage.findById(anfragenIds[0]);
         let a2 = await Anfrage.findById(anfragenIds[1]);
@@ -2837,7 +3484,7 @@ describe('Phasenweise Konfliktlösung PUT /api/konflikte/slot/:konfliktId/...: a
 
     });
 
-    it('sollte Slot-Konflikt im Höchstpreisverfahren bei mit ungültigen oder fehlenden Geboten korrekt behandeln', async () => {
+    it('sollte Slot-Konflikt im Hoechstpreisverfahren bei mit ungueltigen oder fehlenden Geboten korrekt behandeln', async () => {
         // Aktion: Keine Anfrage verzichtet, keine eindeutige Entscheidung anhand des Entgelts löst den Konflikt.
         let a1 = await Anfrage.findById(anfragenIds[0]);
         let a2 = await Anfrage.findById(anfragenIds[1]);

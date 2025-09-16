@@ -103,21 +103,95 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
     });
 
     // Testfall C (vorherige Version, kann bleiben oder durch C_Erweitert ersetzt/ergänzt werden)
-    it('Szenario C (ursprünglich): Tägliche Anfrage (1 Abschnitt) über 2 KWs auf 4 Töpfe', async () => {
+    it('Szenario C urspruenglich Taegliche Anfrage 1 Abschnitt über 2 KWs auf 4 Toepfe', async () => {
         // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
-        const commonSlotParams = {
-            slotTyp: 'TAG',
-            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor",
-            Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 9, minute: 0 },
-            Verkehrsart: "SPFV", Grundentgelt: 150
-        };
+        const slotMoFrKW1Data = {
+                // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                Linienbezeichnung: "Li.99", // Optional
+                Verkehrstag: "Mo-Fr",
+                Kalenderwoche: 1,
+                Abschnitt: "Hauptkorridor",
+                
+                // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                alternativen: [
+                    {
+                        von: "StadtA",
+                        bis: "StadtB",                    
+                        Grundentgelt: 150,
+                        Abfahrt: { stunde: 8, minute: 0 }, // Führt zu Zeitfenster "11-13"
+                        Ankunft: { stunde: 9, minute: 0 },
+                        Verkehrsart: "SPFV", 
+                    }
+                ]
+            }; 
 
-        // Slots für KW1 (global relativ)
-        const slotMoFrKW1Data = { ...commonSlotParams, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data = { ...commonSlotParams, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        // Slots für KW2 (global relativ)
-        const slotMoFrKW2Data = { ...commonSlotParams, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data = { ...commonSlotParams, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
+        const slotSaSoKW1Data = {
+                // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                Linienbezeichnung: "Li.99", // Optional
+                Verkehrstag: "Sa+So",
+                Kalenderwoche: 1,
+                Abschnitt: "Hauptkorridor",
+                
+                // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                alternativen: [
+                    {
+                        von: "StadtA",
+                        bis: "StadtB",                    
+                        Grundentgelt: 150,
+                        Abfahrt: { stunde: 8, minute: 0 }, // Führt zu Zeitfenster "11-13"
+                        Ankunft: { stunde: 9, minute: 0 },
+                        Verkehrsart: "SPFV", 
+                    }
+                ]
+            }; 
+
+        const slotMoFrKW2Data = {
+                // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                Linienbezeichnung: "Li.99", // Optional
+                Verkehrstag: "Mo-Fr",
+                Kalenderwoche: 2,
+                Abschnitt: "Hauptkorridor",
+                
+                // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                alternativen: [
+                    {
+                        von: "StadtA",
+                        bis: "StadtB",                    
+                        Grundentgelt: 150,
+                        Abfahrt: { stunde: 8, minute: 0 }, // Führt zu Zeitfenster "11-13"
+                        Ankunft: { stunde: 9, minute: 0 },
+                        Verkehrsart: "SPFV", 
+                    }
+                ]
+            }; 
+
+        const slotSaSoKW2Data = {
+                // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                Linienbezeichnung: "Li.99", // Optional
+                Verkehrstag: "Sa+So",
+                Kalenderwoche: 2,
+                Abschnitt: "Hauptkorridor",
+                
+                // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                alternativen: [
+                    {
+                        von: "StadtA",
+                        bis: "StadtB",                    
+                        Grundentgelt: 150,
+                        Abfahrt: { stunde: 8, minute: 0 }, // Führt zu Zeitfenster "11-13"
+                        Ankunft: { stunde: 9, minute: 0 },
+                        Verkehrsart: "SPFV", 
+                    }
+                ]
+            };    
 
         const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data);
         const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data);
@@ -236,7 +310,7 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
     });
 
     // NEUER ERWEITERTER TESTFALL
-    it('Szenario C_Erweitert: Tägliche Anfrage (2 Abschnitte) über 2 KWs soll auf 8 Kapazitätstöpfe gemappt werden', async () => {
+    it('Szenario C_Erweitert: Taegliche Anfrage 2 Abschnitte über 2 KWs soll auf 8 Kapazitaetstoepfe gemappt werden', async () => {
         // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
         const abschnitt1 = "Strecke_AB";
         const abschnitt2 = "Strecke_BC"; // Unterschiedlicher Abschnitt für den zweiten Teil der Reise
@@ -259,9 +333,34 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         const erstellteSlots = [];
         let zugehoerigeTopfIds = new Set();
 
-        for (const slotData of slotDefinitions) {
-            const response = await request(app).post('/api/slots').send(slotData);
+        for (const kindSlotData of slotDefinitions) {
+            // Baue den neuen, verschachtelten Payload für jede zu erstellende Slot-Gruppe
+            const payload = {
+                // Eltern-Ebene: Metadaten
+                elternSlotTyp: "TAG", // Alle Kinder sind vom Typ TAG
+                Kalenderwoche: kindSlotData.Kalenderwoche,
+                Verkehrstag: kindSlotData.Verkehrstag,
+                Abschnitt: kindSlotData.Abschnitt,
+                
+                // Kind-Ebene: Die konkreten Alternativen (hier nur eine)
+                alternativen: [
+                    {
+                        von: kindSlotData.von,
+                        bis: kindSlotData.bis,                        
+                        Grundentgelt: kindSlotData.Grundentgelt,
+                        Abfahrt: kindSlotData.Abfahrt,
+                        Ankunft: kindSlotData.Ankunft,
+                        Verkehrsart: kindSlotData.Verkehrsart
+                    }
+                ]
+            };
+
+            const response = await request(app).post('/api/slots').send(payload);
+            
+            // Überprüfe die Antwort
             expect(response.status).toBe(201);
+            expect(response.body.data.slotStrukturTyp).toBe('ELTERN'); // Die API gibt den Eltern-Slot zurück
+
             erstellteSlots.push(response.body.data);
             if (response.body.data.VerweisAufTopf) {
                 zugehoerigeTopfIds.add(response.body.data.VerweisAufTopf.toString());
@@ -344,45 +443,66 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
     });
 
     // Testfall für 3 Anfragen und die Massen-Zuordnung mit dem neuen Endpunkt
-    it('Szenario C (Massen-Operation): 3 Tägliche Anfragen (1 Abschnitt) über 2 KWs auf 4 Töpfe', async () => {
-        // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
-        const commonSlotParams = {
-            slotTyp: 'TAG',
-            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor",
-            Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 9, minute: 0 },
-            Verkehrsart: "SPFV", Grundentgelt: 150
+    it('Szenario C Massen-Operation 3 Taegliche Anfragen 1 Abschnitt über 2 KWs auf 4 Toepfe', async () => {
+        // ----- 1. Vorbereitung: Slots und Töpfe in einer Schleife erstellen -----
+
+        // Definiere die gemeinsamen Eigenschaften der KIND-Slots (der fahrbaren Wege)
+        const commonKindData = {
+            von: "StadtA",
+            bis: "StadtB",
+            Abschnitt: "Hauptkorridor",
+            Abfahrt: { stunde: 8, minute: 0 },
+            Ankunft: { stunde: 9, minute: 0 },
+            Verkehrsart: "SPFV",
+            Grundentgelt: 150
         };
 
-        // Slots für KW1 (global relativ)
-        const slotMoFrKW1Data = { ...commonSlotParams, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data = { ...commonSlotParams, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        // Slots für KW2 (global relativ)
-        const slotMoFrKW2Data = { ...commonSlotParams, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data = { ...commonSlotParams, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        // Slots für KW3 (global relativ)
-        const slotMoFrKW3Data = { ...commonSlotParams, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data = { ...commonSlotParams, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2, 3];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
 
-        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data);
-        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data);
-        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data);
-        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data);
-        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW3Data);
-        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW3Data);
+        const erstellteElternSlots = [];
 
-        expect(respSlot1.status).toBe(201); 
-        expect(respSlot2.status).toBe(201);
-        expect(respSlot3.status).toBe(201); 
-        expect(respSlot4.status).toBe(201);
-        expect(respSlot5.status).toBe(201); 
-        expect(respSlot6.status).toBe(201);
+        // Iteriere durch KWs und Verkehrstage, um 6 Slot-Gruppen zu erstellen
+        for (const kw of kalenderwochen) {
+            for (const vt of verkehrstage) {
+                // Baue den korrekten, verschachtelten Payload für die API
+                const payload = {
+                    elternSlotTyp: "TAG",
+                    Kalenderwoche: kw,
+                    Verkehrstag: vt,
+                    Abschnitt: commonKindData.Abschnitt,
+                    alternativen: [
+                        {
+                            // Hier kommen die spezifischen Eigenschaften des Kind-Slots rein
+                            ...commonKindData 
+                        }
+                    ]
+                };
 
-        const slotMoFrKW1 = respSlot1.body.data;
-        const slotSaSoKW1 = respSlot2.body.data;
-        const slotMoFrKW2 = respSlot3.body.data;
-        const slotSaSoKW2 = respSlot4.body.data;
-        const slotMoFrKW3 = respSlot5.body.data;
-        const slotSaSoKW3 = respSlot6.body.data;
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots')
+                    .send(payload);
+
+                // Überprüfe die Antwort direkt in der Schleife
+                expect(response.status).toBe(201);
+                expect(response.body.data.slotStrukturTyp).toBe('ELTERN');
+                
+                erstellteElternSlots.push(response.body.data);
+                //console.log(response.body.data);
+            }
+        }
+
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(6);
+
+        const slotMoFrKW1 = erstellteElternSlots[0];
+        const slotSaSoKW1 = erstellteElternSlots[1];
+        const slotMoFrKW2 = erstellteElternSlots[2];
+        const slotSaSoKW2 = erstellteElternSlots[3];
+        const slotMoFrKW3 = erstellteElternSlots[4];
+        const slotSaSoKW3 = erstellteElternSlots[5];
 
         // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
         const ktMoFrKW1_Id = slotMoFrKW1.VerweisAufTopf;
@@ -540,61 +660,84 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
     });
 
     // Testfall für 3 Anfragen und die Massen-Zuordnung mit dem neuen Endpunkt
-    it('Szenario D (Massen-Operation): 3 Tägliche Anfragen (1 Abschnitt Tag und 1 Abschnitt Nacht) über 2 KWs auf 4 Töpfe', async () => {
-        // ----- 1. Vorbereitung: Slots erstellen (Töpfe werden auto-erstellt) -----
-        const commonSlotParams1 = {
-            slotTyp: 'TAG',
-            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor1",
-            Abfahrt: { stunde: 22, minute: 0 }, Ankunft: { stunde: 23, minute: 0 },
-            Verkehrsart: "SPFV", Grundentgelt: 150
-        };
+    it('Szenario D Massen-Operation: 3 Taegliche Anfragen 1 Abschnitt Tag und 1 Abschnitt Nacht ueber 2 KWs auf 4 Toepfe', async () => {
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-        const commonSlotParams2 = {
-            slotTyp: 'NACHT',
-            von: "StadtB", bis: "StadtC", Abschnitt: "Hauptkorridor2",
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 80,
-            Grundentgelt: 150
-        };
+        const slotPatterns = [
+            // Muster 1: Ein Tages-Slot
+            {
+                elternSlotTyp: "TAG",
+                alternative: { // Die Daten für den einen KIND-Slot
+                    von: "StadtA", 
+                    bis: "StadtB", 
+                    Abschnitt: "Hauptkorridor1",
+                    Abfahrt: { stunde: 22, minute: 0 }, 
+                    Ankunft: { stunde: 23, minute: 0 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: 150
+                }
+            },
+            // Muster 2: Ein Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "StadtB", 
+                    bis: "StadtC", 
+                    Abschnitt: "Hauptkorridor2",
+                    Zeitfenster: '23-01',
+                    Mindestfahrzeit: 60,
+                    Maximalfahrzeit: 80,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE' // Verkehrsart ist bei Nacht-Slots Teil des Kindes
+                }
+            }
+        ];
 
-        // Slots für KW1 (global relativ)
-        const slotMoFrKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        // Slots für KW2 (global relativ)
-        const slotMoFrKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
 
-        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data1);
-        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data1);
-        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data1);
-        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data1);
-        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW1Data2);
-        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW1Data2);
-        const respSlot7 = await request(app).post('/api/slots').send(slotMoFrKW2Data2);
-        const respSlot8 = await request(app).post('/api/slots').send(slotSaSoKW2Data2);
+        const erstellteElternSlots = [];
 
-        expect(respSlot1.status).toBe(201); 
-        expect(respSlot2.status).toBe(201);
-        expect(respSlot3.status).toBe(201); 
-        expect(respSlot4.status).toBe(201);
-        expect(respSlot5.status).toBe(201); 
-        expect(respSlot6.status).toBe(201);
-        expect(respSlot7.status).toBe(201); 
-        expect(respSlot8.status).toBe(201);
+        // ----- 2. Erstelle alle 8 Slot-Gruppen in einer verschachtelten Schleife -----
 
-        const slotMoFrKW1_1 = respSlot1.body.data;
-        const slotSaSoKW1_1 = respSlot2.body.data;
-        const slotMoFrKW2_1 = respSlot3.body.data;
-        const slotSaSoKW2_1 = respSlot4.body.data;
-        const slotMoFrKW1_2 = respSlot5.body.data;
-        const slotSaSoKW1_2 = respSlot6.body.data;
-        const slotMoFrKW2_2 = respSlot7.body.data;
-        const slotSaSoKW2_2 = respSlot8.body.data;
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative // Füge das definierte Muster als einzige Alternative hinzu
+                        ]
+                    };
+
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
+
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
+        }
+
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(8); // 2 Muster * 2 KWs * 2 Verkehrstage = 8
+
+        const slotMoFrKW1_1 = erstellteElternSlots[0];
+        const slotSaSoKW1_1 = erstellteElternSlots[1];
+        const slotMoFrKW2_1 = erstellteElternSlots[2];
+        const slotSaSoKW2_1 = erstellteElternSlots[3];
+        const slotMoFrKW1_2 = erstellteElternSlots[4];
+        const slotSaSoKW1_2 = erstellteElternSlots[5];
+        const slotMoFrKW2_2 = erstellteElternSlots[6];
+        const slotSaSoKW2_2 = erstellteElternSlots[7];
 
         // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
         const ktMoFrKW1_Id1 = slotMoFrKW1_1.VerweisAufTopf;
@@ -797,114 +940,107 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         // Wir brauchen den Topf Mo-Fr für KW 3, da durch den Tageswechsel der letze Slot am Sonntag 
         // in den Mo-Fr Slot von 01-03 auf dem 3. Abschnitt C-D hineinragt. Die anderen 
         // Töpfe (Mo-Fr A-B und B-C) Sa+So (C-D) in KW 3 bleiben ohne Belegung
-        const commonSlotParams1 = {
-            slotTyp: 'TAG',
-            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor1",
-            Abfahrt: { stunde: 22, minute: 30 }, Ankunft: { stunde: 23, minute: 30 },
-            Verkehrsart: "SPFV", Grundentgelt: 150
-        };
 
-        const commonSlotParams2 = {
-            slotTyp: 'NACHT',
-            von: "StadtB", bis: "StadtC", Abschnitt: "Hauptkorridor2",
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 20,
-            Maximalfahrzeit: 80,
-            Grundentgelt: 150
-        };
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+        const slotPatterns = [
+            // Muster 1: Ein Tages-Slot
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "StadtA", 
+                    bis: "StadtB", 
+                    Abschnitt: "Hauptkorridor1",
+                    Abfahrt: { stunde: 22, minute: 30 }, 
+                    Ankunft: { stunde: 23, minute: 30 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: 150
+                }
+            },
+            // Muster 2: Ein Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "StadtB", 
+                    bis: "StadtC", 
+                    Abschnitt: "Hauptkorridor2",
+                    Zeitfenster: '23-01',
+                    Mindestfahrzeit: 20,
+                    Maximalfahrzeit: 80,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE'
+                }
+            },
+            // Muster 3: Ein weiterer Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "StadtC", 
+                    bis: "StadtD", 
+                    Abschnitt: "Hauptkorridor3",
+                    Zeitfenster: '01-03',
+                    Mindestfahrzeit: 60,
+                    Maximalfahrzeit: 80,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE'
+                }
+            }
+        ];
 
-        const commonSlotParams3 = {
-            slotTyp: 'NACHT',
-            von: "StadtC", bis: "StadtD", Abschnitt: "Hauptkorridor3",
-            Zeitfenster: '01-03',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 80,
-            Grundentgelt: 150
-        };
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2, 3];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
 
-        // Slots für KW1 (global relativ)
-        const slotMoFrKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data3 = { ...commonSlotParams3, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data3 = { ...commonSlotParams3, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        // Slots für KW2 (global relativ)
-        const slotMoFrKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data3 = { ...commonSlotParams3, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data3 = { ...commonSlotParams3, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
+        const erstellteElternSlots = [];
 
-        // Slots für KW3 (global relativ)
-        const slotMoFrKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data3 = { ...commonSlotParams3, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data3 = { ...commonSlotParams3, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
+        // ----- 2. Erstelle alle 18 Slot-Gruppen in einer verschachtelten Schleife -----
 
-        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data1);
-        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data1);
-        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data1);
-        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data1);
-        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW1Data2);
-        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW1Data2);
-        const respSlot7 = await request(app).post('/api/slots').send(slotMoFrKW2Data2);
-        const respSlot8 = await request(app).post('/api/slots').send(slotSaSoKW2Data2);
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
 
-        const respSlot9 = await request(app).post('/api/slots').send(slotMoFrKW1Data3);
-        const respSlot10 = await request(app).post('/api/slots').send(slotSaSoKW1Data3);
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
 
-        const respSlot11 = await request(app).post('/api/slots').send(slotMoFrKW2Data3);
-        const respSlot12 = await request(app).post('/api/slots').send(slotSaSoKW2Data3);
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
+        }
 
-        const respSlot13 = await request(app).post('/api/slots').send(slotMoFrKW3Data1);
-        const respSlot14 = await request(app).post('/api/slots').send(slotSaSoKW3Data1);
-        const respSlot15 = await request(app).post('/api/slots').send(slotMoFrKW3Data2);
-        const respSlot16 = await request(app).post('/api/slots').send(slotSaSoKW3Data2);
-        const respSlot17 = await request(app).post('/api/slots').send(slotMoFrKW3Data3);
-        const respSlot18 = await request(app).post('/api/slots').send(slotSaSoKW3Data3);
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(18); // 3 Muster * 3 KWs * 2 Verkehrstage = 18
 
-        expect(respSlot1.status).toBe(201); 
-        expect(respSlot2.status).toBe(201);
-        expect(respSlot3.status).toBe(201); 
-        expect(respSlot4.status).toBe(201);
-        expect(respSlot5.status).toBe(201); 
-        expect(respSlot6.status).toBe(201);
-        expect(respSlot7.status).toBe(201); 
-        expect(respSlot8.status).toBe(201);
-        expect(respSlot9.status).toBe(201); 
-        expect(respSlot10.status).toBe(201);
-        expect(respSlot11.status).toBe(201); 
-        expect(respSlot12.status).toBe(201);
-        expect(respSlot13.status).toBe(201); 
-        expect(respSlot14.status).toBe(201);
-        expect(respSlot15.status).toBe(201); 
-        expect(respSlot16.status).toBe(201);
-        expect(respSlot17.status).toBe(201); 
-        expect(respSlot18.status).toBe(201);
-
-        const slotMoFrKW1_1 = respSlot1.body.data;
-        const slotSaSoKW1_1 = respSlot2.body.data;
-        const slotMoFrKW2_1 = respSlot3.body.data;
-        const slotSaSoKW2_1 = respSlot4.body.data;
-        const slotMoFrKW1_2 = respSlot5.body.data;
-        const slotSaSoKW1_2 = respSlot6.body.data;
-        const slotMoFrKW2_2 = respSlot7.body.data;
-        const slotSaSoKW2_2 = respSlot8.body.data;
-        const slotMoFrKW1_3 = respSlot9.body.data;
-        const slotSaSoKW1_3 = respSlot10.body.data;
-        const slotMoFrKW2_3 = respSlot11.body.data;
-        const slotSaSoKW2_3 = respSlot12.body.data;
-
-        const slotMoFrKW3_1 = respSlot13.body.data;
-        const slotSaSoKW3_1 = respSlot14.body.data;
-        const slotMoFrKW3_2 = respSlot15.body.data;
-        const slotSaSoKW3_2 = respSlot16.body.data;
-        const slotMoFrKW3_3 = respSlot17.body.data;
-        const slotSaSoKW3_3 = respSlot18.body.data;
+        const slotMoFrKW1_1 = erstellteElternSlots[0];
+        const slotSaSoKW1_1 = erstellteElternSlots[1];
+        const slotMoFrKW2_1 = erstellteElternSlots[2];
+        const slotSaSoKW2_1 = erstellteElternSlots[3];
+        const slotMoFrKW3_1 = erstellteElternSlots[4];
+        const slotSaSoKW3_1 = erstellteElternSlots[5];
+        const slotMoFrKW1_2 = erstellteElternSlots[6];
+        const slotSaSoKW1_2 = erstellteElternSlots[7];
+        const slotMoFrKW2_2 = erstellteElternSlots[8];
+        const slotSaSoKW2_2 = erstellteElternSlots[9];
+        const slotMoFrKW3_2 = erstellteElternSlots[10];
+        const slotSaSoKW3_2 = erstellteElternSlots[11];
+        const slotMoFrKW1_3 = erstellteElternSlots[12];
+        const slotSaSoKW1_3 = erstellteElternSlots[13];
+        const slotMoFrKW2_3 = erstellteElternSlots[14];
+        const slotSaSoKW2_3 = erstellteElternSlots[15];
+        const slotMoFrKW3_3 = erstellteElternSlots[16];
+        const slotSaSoKW3_3 = erstellteElternSlots[17];
 
         // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
         const ktMoFrKW1_Id1 = slotMoFrKW1_1.VerweisAufTopf;
@@ -1232,112 +1368,106 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         // Wir brauchen den Topf Mo-Fr für KW 3, da durch den Tageswechsel der letze Slot am Sonntag 
         // in den Mo-Fr Slot von 01-03 auf dem 3. Abschnitt C-D hineinragt. Die anderen 
         // Töpfe (Mo-Fr A-B und B-C) Sa+So (C-D) in KW 3 bleiben ohne Belegung
-        const commonSlotParams1 = {
-            slotTyp: 'TAG',
-            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor1",
-            Abfahrt: { stunde: 22, minute: 30 }, Ankunft: { stunde: 23, minute: 45 },
-            Verkehrsart: "SGV", Grundentgelt: 150
-        };
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-        const commonSlotParams2 = {
-            slotTyp: 'NACHT',
-            von: "StadtB", bis: "StadtC", Abschnitt: "Hauptkorridor2",
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 240,
-            Maximalfahrzeit: 400,
-            Grundentgelt: 150
-        };
+        const slotPatterns = [
+            // Muster 1: Ein Tages-Slot
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "StadtA", 
+                    bis: "StadtB", 
+                    Abschnitt: "Hauptkorridor1",
+                    Abfahrt: { stunde: 22, minute: 30 }, 
+                    Ankunft: { stunde: 23, minute: 45 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: 150
+                }
+            },
+            // Muster 2: Ein Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "StadtB", 
+                    bis: "StadtC", 
+                    Abschnitt: "Hauptkorridor2",
+                    Zeitfenster: '23-01',
+                    Mindestfahrzeit: 240,
+                    Maximalfahrzeit: 400,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE'
+                }
+            },
+            // Muster 3: Ein weiterer Tages-Slot (am frühen Morgen)
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "StadtC", 
+                    bis: "StadtD", 
+                    Abschnitt: "Hauptkorridor3",
+                    Abfahrt: { stunde: 5, minute: 5 }, 
+                    Ankunft: { stunde: 6, minute: 25 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: 150
+                }
+            }
+        ];
 
-        const commonSlotParams3 = {
-            slotTyp: 'TAG',
-            von: "StadtC", bis: "StadtD", Abschnitt: "Hauptkorridor3",
-            Abfahrt: { stunde: 5, minute: 5 }, Ankunft: { stunde: 6, minute: 25 },
-            Verkehrsart: "SGV", Grundentgelt: 150
-        };
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2, 3];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
 
-        // Slots für KW1 (global relativ)
-        const slotMoFrKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data3 = { ...commonSlotParams3, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data3 = { ...commonSlotParams3, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        // Slots für KW2 (global relativ)
-        const slotMoFrKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data3 = { ...commonSlotParams3, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data3 = { ...commonSlotParams3, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
+        const erstellteElternSlots = [];
 
-        // Slots für KW3 (global relativ)
-        const slotMoFrKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data3 = { ...commonSlotParams3, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data3 = { ...commonSlotParams3, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
+        // ----- 2. Erstelle alle 18 Slot-Gruppen in einer verschachtelten Schleife -----
 
-        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data1);
-        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data1);
-        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data1);
-        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data1);
-        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW1Data2);
-        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW1Data2);
-        const respSlot7 = await request(app).post('/api/slots').send(slotMoFrKW2Data2);
-        const respSlot8 = await request(app).post('/api/slots').send(slotSaSoKW2Data2);
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
 
-        const respSlot9 = await request(app).post('/api/slots').send(slotMoFrKW1Data3);
-        const respSlot10 = await request(app).post('/api/slots').send(slotSaSoKW1Data3);
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
 
-        const respSlot11 = await request(app).post('/api/slots').send(slotMoFrKW2Data3);
-        const respSlot12 = await request(app).post('/api/slots').send(slotSaSoKW2Data3);
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
+        }
 
-        const respSlot13 = await request(app).post('/api/slots').send(slotMoFrKW3Data1);
-        const respSlot14 = await request(app).post('/api/slots').send(slotSaSoKW3Data1);
-        const respSlot15 = await request(app).post('/api/slots').send(slotMoFrKW3Data2);
-        const respSlot16 = await request(app).post('/api/slots').send(slotSaSoKW3Data2);
-        const respSlot17 = await request(app).post('/api/slots').send(slotMoFrKW3Data3);
-        const respSlot18 = await request(app).post('/api/slots').send(slotSaSoKW3Data3);
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(18); // 3 Muster * 3 KWs * 2 Verkehrstage = 18
 
-        expect(respSlot1.status).toBe(201); 
-        expect(respSlot2.status).toBe(201);
-        expect(respSlot3.status).toBe(201); 
-        expect(respSlot4.status).toBe(201);
-        expect(respSlot5.status).toBe(201); 
-        expect(respSlot6.status).toBe(201);
-        expect(respSlot7.status).toBe(201); 
-        expect(respSlot8.status).toBe(201);
-        expect(respSlot9.status).toBe(201); 
-        expect(respSlot10.status).toBe(201);
-        expect(respSlot11.status).toBe(201); 
-        expect(respSlot12.status).toBe(201);
-        expect(respSlot13.status).toBe(201); 
-        expect(respSlot14.status).toBe(201);
-        expect(respSlot15.status).toBe(201); 
-        expect(respSlot16.status).toBe(201);
-        expect(respSlot17.status).toBe(201); 
-        expect(respSlot18.status).toBe(201);
-
-        const slotMoFrKW1_1 = respSlot1.body.data;
-        const slotSaSoKW1_1 = respSlot2.body.data;
-        const slotMoFrKW2_1 = respSlot3.body.data;
-        const slotSaSoKW2_1 = respSlot4.body.data;
-        const slotMoFrKW1_2 = respSlot5.body.data;
-        const slotSaSoKW1_2 = respSlot6.body.data;
-        const slotMoFrKW2_2 = respSlot7.body.data;
-        const slotSaSoKW2_2 = respSlot8.body.data;
-        const slotMoFrKW1_3 = respSlot9.body.data;
-        const slotSaSoKW1_3 = respSlot10.body.data;
-        const slotMoFrKW2_3 = respSlot11.body.data;
-        const slotSaSoKW2_3 = respSlot12.body.data;
-
-        const slotMoFrKW3_1 = respSlot13.body.data;
-        const slotSaSoKW3_1 = respSlot14.body.data;
-        const slotMoFrKW3_2 = respSlot15.body.data;
-        const slotSaSoKW3_2 = respSlot16.body.data;
-        const slotMoFrKW3_3 = respSlot17.body.data;
-        const slotSaSoKW3_3 = respSlot18.body.data;
+        const slotMoFrKW1_1 = erstellteElternSlots[0];
+        const slotSaSoKW1_1 = erstellteElternSlots[1];
+        const slotMoFrKW2_1 = erstellteElternSlots[2];
+        const slotSaSoKW2_1 = erstellteElternSlots[3];
+        const slotMoFrKW3_1 = erstellteElternSlots[4];
+        const slotSaSoKW3_1 = erstellteElternSlots[5];
+        const slotMoFrKW1_2 = erstellteElternSlots[6];
+        const slotSaSoKW1_2 = erstellteElternSlots[7];
+        const slotMoFrKW2_2 = erstellteElternSlots[8];
+        const slotSaSoKW2_2 = erstellteElternSlots[9];
+        const slotMoFrKW3_2 = erstellteElternSlots[10];
+        const slotSaSoKW3_2 = erstellteElternSlots[11];
+        const slotMoFrKW1_3 = erstellteElternSlots[12];
+        const slotSaSoKW1_3 = erstellteElternSlots[13];
+        const slotMoFrKW2_3 = erstellteElternSlots[14];
+        const slotSaSoKW2_3 = erstellteElternSlots[15];
+        const slotMoFrKW3_3 = erstellteElternSlots[16];
+        const slotSaSoKW3_3 = erstellteElternSlots[17];
 
         // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
         const ktMoFrKW1_Id1 = slotMoFrKW1_1.VerweisAufTopf;
@@ -1671,142 +1801,113 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         // Wir brauchen den Topf Mo-Fr für KW 1, da durch den Tageswechsel am Morgen der erste Slot am Samstag bzw. Montag 
         // in den Mo-Fr / Sa+So Slot von 23-01 auf dem 1. Abschnitt A-B hineinragt. Die anderen 
         // Töpfe (Mo-Fr B-C und C-D) in KW 1 und alle Töpfe in KW 4 bleiben ohne Belegung
-        const commonSlotParams1 = {
-            slotTyp: 'NACHT',
-            von: "StadtA", bis: "StadtB", Abschnitt: "Hauptkorridor1",
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 120,
-            Maximalfahrzeit: 150,
-            Grundentgelt: 150
-        };
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-        const commonSlotParams2 = {
-            slotTyp: 'NACHT',
-            von: "StadtB", bis: "StadtC", Abschnitt: "Hauptkorridor2",
-            Zeitfenster: '01-03',
-            Mindestfahrzeit: 120,
-            Maximalfahrzeit: 150,
-            Grundentgelt: 150
-        };
+        const slotPatterns = [
+            // Muster 1: Ein Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "StadtA", 
+                    bis: "StadtB", 
+                    Abschnitt: "Hauptkorridor1",
+                    Zeitfenster: '23-01',
+                    Mindestfahrzeit: 120,
+                    Maximalfahrzeit: 150,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE'
+                }
+            },
+            // Muster 2: Ein weiterer Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "StadtB", 
+                    bis: "StadtC", 
+                    Abschnitt: "Hauptkorridor2",
+                    Zeitfenster: '01-03',
+                    Mindestfahrzeit: 120,
+                    Maximalfahrzeit: 150,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE'
+                }
+            },
+            // Muster 3: Ein Tages-Slot
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "StadtC", 
+                    bis: "StadtD", 
+                    Abschnitt: "Hauptkorridor3",
+                    Abfahrt: { stunde: 5, minute: 5 }, 
+                    Ankunft: { stunde: 6, minute: 25 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: 150
+                }
+            }
+        ];
 
-        const commonSlotParams3 = {
-            slotTyp: 'TAG',
-            von: "StadtC", bis: "StadtD", Abschnitt: "Hauptkorridor3",
-            Abfahrt: { stunde: 5, minute: 5 }, Ankunft: { stunde: 6, minute: 25 },
-            Verkehrsart: "SGV", Grundentgelt: 150
-        };
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2, 3, 4];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
 
-        // Slots für KW1 (global relativ)
-        const slotMoFrKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data3 = { ...commonSlotParams3, Kalenderwoche: 1, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data3 = { ...commonSlotParams3, Kalenderwoche: 1, Verkehrstag: "Sa+So" };
-        // Slots für KW2 (global relativ)
-        const slotMoFrKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data3 = { ...commonSlotParams3, Kalenderwoche: 2, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data3 = { ...commonSlotParams3, Kalenderwoche: 2, Verkehrstag: "Sa+So" };
+        const erstellteElternSlots = [];
 
-        // Slots für KW3 (global relativ)
-        const slotMoFrKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data3 = { ...commonSlotParams3, Kalenderwoche: 3, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data3 = { ...commonSlotParams3, Kalenderwoche: 3, Verkehrstag: "Sa+So" };
+        // ----- 2. Erstelle alle 24 Slot-Gruppen in einer verschachtelten Schleife -----
 
-        // Slots für KW4 (global relativ)
-        const slotMoFrKW4Data1 = { ...commonSlotParams1, Kalenderwoche: 4, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW4Data1 = { ...commonSlotParams1, Kalenderwoche: 4, Verkehrstag: "Sa+So" };
-        const slotMoFrKW4Data2 = { ...commonSlotParams2, Kalenderwoche: 4, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW4Data2 = { ...commonSlotParams2, Kalenderwoche: 4, Verkehrstag: "Sa+So" };
-        const slotMoFrKW4Data3 = { ...commonSlotParams3, Kalenderwoche: 4, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW4Data3 = { ...commonSlotParams3, Kalenderwoche: 4, Verkehrstag: "Sa+So" };
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
 
-        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data1);
-        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data1);
-        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data1);
-        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data1);
-        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW1Data2);
-        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW1Data2);
-        const respSlot7 = await request(app).post('/api/slots').send(slotMoFrKW2Data2);
-        const respSlot8 = await request(app).post('/api/slots').send(slotSaSoKW2Data2);
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
 
-        const respSlot9 = await request(app).post('/api/slots').send(slotMoFrKW1Data3);
-        const respSlot10 = await request(app).post('/api/slots').send(slotSaSoKW1Data3);
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
+        }
 
-        const respSlot11 = await request(app).post('/api/slots').send(slotMoFrKW2Data3);
-        const respSlot12 = await request(app).post('/api/slots').send(slotSaSoKW2Data3);
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(24); // 3 Muster * 4 KWs * 2 Verkehrstage = 24
 
-        const respSlot13 = await request(app).post('/api/slots').send(slotMoFrKW3Data1);
-        const respSlot14 = await request(app).post('/api/slots').send(slotSaSoKW3Data1);
-        const respSlot15 = await request(app).post('/api/slots').send(slotMoFrKW3Data2);
-        const respSlot16 = await request(app).post('/api/slots').send(slotSaSoKW3Data2);
-        const respSlot17 = await request(app).post('/api/slots').send(slotMoFrKW3Data3);
-        const respSlot18 = await request(app).post('/api/slots').send(slotSaSoKW3Data3);
-
-        const respSlot19 = await request(app).post('/api/slots').send(slotMoFrKW4Data1);
-        const respSlot20 = await request(app).post('/api/slots').send(slotSaSoKW4Data1);
-        const respSlot21 = await request(app).post('/api/slots').send(slotMoFrKW4Data2);
-        const respSlot22 = await request(app).post('/api/slots').send(slotSaSoKW4Data2);
-        const respSlot23 = await request(app).post('/api/slots').send(slotMoFrKW4Data3);
-        const respSlot24 = await request(app).post('/api/slots').send(slotSaSoKW4Data3);
-
-        expect(respSlot1.status).toBe(201); 
-        expect(respSlot2.status).toBe(201);
-        expect(respSlot3.status).toBe(201); 
-        expect(respSlot4.status).toBe(201);
-        expect(respSlot5.status).toBe(201); 
-        expect(respSlot6.status).toBe(201);
-        expect(respSlot7.status).toBe(201); 
-        expect(respSlot8.status).toBe(201);
-        expect(respSlot9.status).toBe(201); 
-        expect(respSlot10.status).toBe(201);
-        expect(respSlot11.status).toBe(201); 
-        expect(respSlot12.status).toBe(201);
-        expect(respSlot13.status).toBe(201); 
-        expect(respSlot14.status).toBe(201);
-        expect(respSlot15.status).toBe(201); 
-        expect(respSlot16.status).toBe(201);
-        expect(respSlot17.status).toBe(201); 
-        expect(respSlot18.status).toBe(201);
-        expect(respSlot19.status).toBe(201); 
-        expect(respSlot20.status).toBe(201);
-        expect(respSlot21.status).toBe(201); 
-        expect(respSlot22.status).toBe(201);
-        expect(respSlot23.status).toBe(201); 
-        expect(respSlot24.status).toBe(201);
-
-        const slotMoFrKW1_1 = respSlot1.body.data;
-        const slotSaSoKW1_1 = respSlot2.body.data;
-        const slotMoFrKW2_1 = respSlot3.body.data;
-        const slotSaSoKW2_1 = respSlot4.body.data;
-        const slotMoFrKW1_2 = respSlot5.body.data;
-        const slotSaSoKW1_2 = respSlot6.body.data;
-        const slotMoFrKW2_2 = respSlot7.body.data;
-        const slotSaSoKW2_2 = respSlot8.body.data;
-        const slotMoFrKW1_3 = respSlot9.body.data;
-        const slotSaSoKW1_3 = respSlot10.body.data;
-        const slotMoFrKW2_3 = respSlot11.body.data;
-        const slotSaSoKW2_3 = respSlot12.body.data;
-
-        const slotMoFrKW3_1 = respSlot13.body.data;
-        const slotSaSoKW3_1 = respSlot14.body.data;
-        const slotMoFrKW3_2 = respSlot15.body.data;
-        const slotSaSoKW3_2 = respSlot16.body.data;
-        const slotMoFrKW3_3 = respSlot17.body.data;
-        const slotSaSoKW3_3 = respSlot18.body.data;
-
-        const slotMoFrKW4_1 = respSlot19.body.data;
-        const slotSaSoKW4_1 = respSlot20.body.data;
-        const slotMoFrKW4_2 = respSlot21.body.data;
-        const slotSaSoKW4_2 = respSlot22.body.data;
-        const slotMoFrKW4_3 = respSlot23.body.data;
-        const slotSaSoKW4_3 = respSlot24.body.data;
+        const slotMoFrKW1_1 = erstellteElternSlots[0];
+        const slotSaSoKW1_1 = erstellteElternSlots[1];
+        const slotMoFrKW2_1 = erstellteElternSlots[2];
+        const slotSaSoKW2_1 = erstellteElternSlots[3];
+        const slotMoFrKW3_1 = erstellteElternSlots[4];
+        const slotSaSoKW3_1 = erstellteElternSlots[5];
+        const slotMoFrKW4_1 = erstellteElternSlots[6];
+        const slotSaSoKW4_1 = erstellteElternSlots[7];
+        const slotMoFrKW1_2 = erstellteElternSlots[8];
+        const slotSaSoKW1_2 = erstellteElternSlots[9];
+        const slotMoFrKW2_2 = erstellteElternSlots[10];
+        const slotSaSoKW2_2 = erstellteElternSlots[11];
+        const slotMoFrKW3_2 = erstellteElternSlots[12];
+        const slotSaSoKW3_2 = erstellteElternSlots[13];
+        const slotMoFrKW4_2 = erstellteElternSlots[14];
+        const slotSaSoKW4_2 = erstellteElternSlots[15];
+        const slotMoFrKW1_3 = erstellteElternSlots[16];
+        const slotSaSoKW1_3 = erstellteElternSlots[17];
+        const slotMoFrKW2_3 = erstellteElternSlots[18];
+        const slotSaSoKW2_3 = erstellteElternSlots[19];
+        const slotMoFrKW3_3 = erstellteElternSlots[20];
+        const slotSaSoKW3_3 = erstellteElternSlots[21];
+        const slotMoFrKW4_3 = erstellteElternSlots[22];
+        const slotSaSoKW4_3 = erstellteElternSlots[23];
 
         // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
         const ktMoFrKW1_Id1 = slotMoFrKW1_1.VerweisAufTopf;
@@ -2193,79 +2294,88 @@ describe('Anfrage Zuordnung zu Kapazitätstöpfen (/api/anfragen/:id/zuordnen)',
         // Wir brauchen den Topf Mo-Fr für KW 28-30, da durch den Tageswechsel am Morgen der zweite Slot am Mo-Fr 
         // auch in die Sa+So-Topf der gleichen KW geht. Die anderen 
         // Töpfe bleiben ohne Belegung
-        const commonSlotParams1 = {
-            slotTyp: 'TAG',
-            von: "A", bis: "B", Abschnitt: "Strecke1",
-            Abfahrt: { stunde: 22, minute: 31 }, Ankunft: { stunde: 23, minute: 48 },
-            Verkehrsart: "SGV", Grundentgelt: 150
-        };
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-        const commonSlotParams2 = {
-            slotTyp: 'NACHT',
-            von: "B", bis: "C", Abschnitt: "Strecke2",
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 90,
-            Grundentgelt: 150
-        };
+        const slotPatterns = [
+            // Muster 1: Ein Tages-Slot
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "A", 
+                    bis: "B", 
+                    Abschnitt: "Strecke1",
+                    Abfahrt: { stunde: 22, minute: 31 }, 
+                    Ankunft: { stunde: 23, minute: 48 },
+                    Verkehrsart: "SGV", 
+                    Grundentgelt: 150
+                }
+            },
+            // Muster 2: Ein Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "B", 
+                    bis: "C", 
+                    Abschnitt: "Strecke2",
+                    Zeitfenster: '23-01',
+                    Mindestfahrzeit: 60,
+                    Maximalfahrzeit: 90,
+                    Grundentgelt: 150,
+                    Verkehrsart: 'ALLE'
+                }
+            }
+        ];
 
-        // Slots für KW28 (global relativ)
-        const slotMoFrKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 28, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data1 = { ...commonSlotParams1, Kalenderwoche: 28, Verkehrstag: "Sa+So" };
-        const slotMoFrKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 28, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW1Data2 = { ...commonSlotParams2, Kalenderwoche: 28, Verkehrstag: "Sa+So" };
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [28, 29, 30];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
 
-        // Slots für KW29 (global relativ)
-        const slotMoFrKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 29, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data1 = { ...commonSlotParams1, Kalenderwoche: 29, Verkehrstag: "Sa+So" };
-        const slotMoFrKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 29, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW2Data2 = { ...commonSlotParams2, Kalenderwoche: 29, Verkehrstag: "Sa+So" };
+        const erstellteElternSlots = [];
 
-        // Slots für KW30 (global relativ)
-        const slotMoFrKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 30, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data1 = { ...commonSlotParams1, Kalenderwoche: 30, Verkehrstag: "Sa+So" };
-        const slotMoFrKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 30, Verkehrstag: "Mo-Fr" };
-        const slotSaSoKW3Data2 = { ...commonSlotParams2, Kalenderwoche: 30, Verkehrstag: "Sa+So" };
+        // ----- 2. Erstelle alle 12 Slot-Gruppen in einer verschachtelten Schleife -----
 
-        const respSlot1 = await request(app).post('/api/slots').send(slotMoFrKW1Data1);
-        const respSlot2 = await request(app).post('/api/slots').send(slotSaSoKW1Data1);
-        const respSlot3 = await request(app).post('/api/slots').send(slotMoFrKW2Data1);
-        const respSlot4 = await request(app).post('/api/slots').send(slotSaSoKW2Data1);
-        const respSlot5 = await request(app).post('/api/slots').send(slotMoFrKW1Data2);
-        const respSlot6 = await request(app).post('/api/slots').send(slotSaSoKW1Data2);
-        const respSlot7 = await request(app).post('/api/slots').send(slotMoFrKW2Data2);
-        const respSlot8 = await request(app).post('/api/slots').send(slotSaSoKW2Data2);
-        const respSlot9 = await request(app).post('/api/slots').send(slotMoFrKW3Data1);
-        const respSlot10 = await request(app).post('/api/slots').send(slotSaSoKW3Data1);
-        const respSlot11 = await request(app).post('/api/slots').send(slotMoFrKW3Data2);
-        const respSlot12 = await request(app).post('/api/slots').send(slotSaSoKW3Data2);
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
 
-        expect(respSlot1.status).toBe(201); 
-        expect(respSlot2.status).toBe(201);
-        expect(respSlot3.status).toBe(201); 
-        expect(respSlot4.status).toBe(201);
-        expect(respSlot5.status).toBe(201); 
-        expect(respSlot6.status).toBe(201);
-        expect(respSlot7.status).toBe(201); 
-        expect(respSlot8.status).toBe(201);
-        expect(respSlot9.status).toBe(201); 
-        expect(respSlot10.status).toBe(201);
-        expect(respSlot11.status).toBe(201); 
-        expect(respSlot12.status).toBe(201);
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
+
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
+        }
+
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(12); // 2 Muster * 3 KWs * 2 Verkehrstage = 12
 
         
-        const slotMoFrKW1_1 = respSlot1.body.data;
-        const slotSaSoKW1_1 = respSlot2.body.data;
-        const slotMoFrKW2_1 = respSlot3.body.data;
-        const slotSaSoKW2_1 = respSlot4.body.data;
-        const slotMoFrKW1_2 = respSlot5.body.data;
-        const slotSaSoKW1_2 = respSlot6.body.data;
-        const slotMoFrKW2_2 = respSlot7.body.data;
-        const slotSaSoKW2_2 = respSlot8.body.data;
-        const slotMoFrKW3_1 = respSlot9.body.data;
-        const slotSaSoKW3_1 = respSlot10.body.data;
-        const slotMoFrKW3_2 = respSlot11.body.data;
-        const slotSaSoKW3_2 = respSlot12.body.data;
+        const slotMoFrKW1_1 = erstellteElternSlots[0];
+        const slotSaSoKW1_1 = erstellteElternSlots[1];
+        const slotMoFrKW2_1 = erstellteElternSlots[2];
+        const slotSaSoKW2_1 = erstellteElternSlots[3];
+        const slotMoFrKW3_1 = erstellteElternSlots[4];
+        const slotSaSoKW3_1 = erstellteElternSlots[5];
+        const slotMoFrKW1_2 = erstellteElternSlots[6];
+        const slotSaSoKW1_2 = erstellteElternSlots[7];
+        const slotMoFrKW2_2 = erstellteElternSlots[8];
+        const slotSaSoKW2_2 = erstellteElternSlots[9];       
+        const slotMoFrKW3_2 = erstellteElternSlots[10];
+        const slotSaSoKW3_2 = erstellteElternSlots[11];
 
         // IDs der automatisch erstellten/gefundenen Kapazitätstöpfe holen
         const ktMoFrKW1_Id1 = slotMoFrKW1_1.VerweisAufTopf;
@@ -2426,15 +2536,30 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         }
     });
 
-    it('E1: Sollte das Entgelt für eine einfache Anfrage mit einem Slot-Abschnitt korrekt berechnen', async () => {
+    it('E1 Sollte das Entgelt für eine einfache Anfrage mit einem Slot-Abschnitt korrekt berechnen', async () => {
         // 1. Vorbereitung: Slot erstellen
         const slotData_E1 = {
-            slotTyp: 'TAG',
-            von: "StartE1", bis: "EndeE1", Abschnitt: "Einfach",
-            Abfahrt: { stunde: 10, minute: 0 }, Ankunft: { stunde: 11, minute: 0 },
-            Verkehrstag: "Mo-Fr", Kalenderwoche: 10, // Globale relative KW 10
-            Verkehrsart: "SPNV", Grundentgelt: 100
-        };
+                // Eigenschaften, die für die gesamte Slot-Gruppe (den ELTERN-Teil) gelten
+                elternSlotTyp: "TAG", // Gibt an, dass die Kinder Tages-Slots sind
+                Linienbezeichnung: "Li.99", // Optional
+                Verkehrstag: "Mo-Fr",
+                Kalenderwoche: 10,
+                Abschnitt: "Einfach",
+                
+                // Ein Array, das alle fahrbaren Alternativen (die KIND-Teile) beschreibt.
+                // Für einen einfachen Slot gibt es hier nur einen Eintrag.
+                alternativen: [
+                    {
+                        von: "StartE1",
+                        bis: "EndeE1",                    
+                        Grundentgelt: 100,
+                        Abfahrt: { stunde: 10, minute: 0 }, // Führt zu Zeitfenster "11-13"
+                        Ankunft: { stunde: 11, minute: 0 },
+                        Verkehrsart: "SPNV", 
+                    }
+                ]
+            }; 
+        
         const slotResponse = await request(app).post('/api/slots').send(slotData_E1);
         expect(slotResponse.status).toBe(201);
         const s_E1 = slotResponse.body.data;
@@ -2481,7 +2606,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         expect(aktualisierteAnfrage_E1.ZugewieseneSlots[0].slot.toString()).toBe(s_E1._id.toString());
         expect(aktualisierteAnfrage_E1.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('initial_in_konfliktpruefung_topf');
         
-        const erwartetesEntgelt_E1 = erwarteteBetriebstage_E1 * s_E1.Grundentgelt; // 3 * 100 = 300
+        const erwartetesEntgelt_E1 = erwarteteBetriebstage_E1 * s_E1.gabelAlternativen[0].Grundentgelt; // 3 * 100 = 300
         expect(aktualisierteAnfrage_E1.Entgelt).toBe(erwartetesEntgelt_E1);
 
         // Direkte DB-Prüfung
@@ -2489,38 +2614,76 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         expect(anfrageDB.Entgelt).toBe(erwartetesEntgelt_E1);
     });
 
-    it('E2: Sollte das Entgelt für eine tägliche Anfrage mit 2 Abschnitten über 2 KWs korrekt berechnen', async () => {
-        // ----- 1. Vorbereitung: Slot-Muster erstellen -----
+    it('E2 Sollte das Entgelt für eine taegliche Anfrage mit 2 Abschnitten über 2 KWs korrekt berechnen', async () => {
+        // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
         const grundentgelt_AB = 100;
         const grundentgelt_BC = 50;
-        const gemeinsamerAbschnittParams = { Verkehrsart: "SPFV", AbfahrtStunde: 8, AnkunftStunde: 9 };
 
-        const slotDefinitionen = [
-            // Abschnitt A->B
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_AB, ...gemeinsamerAbschnittParams },
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 1, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_AB, ...gemeinsamerAbschnittParams },
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_AB, ...gemeinsamerAbschnittParams },
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 2, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_AB, ...gemeinsamerAbschnittParams },
-            // Abschnitt B->C
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_BC, ...gemeinsamerAbschnittParams },
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 1, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_BC, ...gemeinsamerAbschnittParams },
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_BC, ...gemeinsamerAbschnittParams },
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 2, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_BC, ...gemeinsamerAbschnittParams },
+        const slotPatterns = [
+            // Muster 1: Ein Tages-Slot für Strecke A -> B        
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "A", 
+                    bis: "B", 
+                    Abschnitt: "AB_Strecke",
+                    Abfahrt: { stunde: 8, minute: 0 }, 
+                    Ankunft: { stunde: 9, minute: 0 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: grundentgelt_AB // grundentgelt_AB
+                }
+            },
+            // Muster 2: Ein Tages-Slot für Strecke B -> C
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "B", 
+                    bis: "C", 
+                    Abschnitt: "BC_Strecke",
+                    Abfahrt: { stunde: 9, minute: 2 }, 
+                    Ankunft: { stunde: 9, minute: 50 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: grundentgelt_BC // grundentgelt_BC
+                }
+            }
         ];
 
-        const erstellteSlotObjekte = [];
-        for (const def of slotDefinitionen) {
-            const slotData = {
-                slotTyp: 'TAG',
-                von: def.von, bis: def.bis, Abschnitt: def.Abschnitt,
-                Abfahrt: { stunde: def.AbfahrtStunde, minute: 0 }, Ankunft: { stunde: def.AnkunftStunde, minute: 0 },
-                Verkehrstag: def.Verkehrstag, Kalenderwoche: def.Kalenderwoche, Verkehrsart: def.Verkehrsart, Grundentgelt: def.Grundentgelt
-            };
-            const response = await request(app).post('/api/slots').send(slotData);
-            expect(response.status).toBe(201);
-            erstellteSlotObjekte.push(response.body.data);
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
+
+        const erstellteElternSlots = [];
+
+        // ----- 2. Erstelle alle 8 Slot-Gruppen in einer verschachtelten Schleife -----
+
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
+
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
+
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
         }
-        expect(erstellteSlotObjekte).toHaveLength(8);
+
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(8); // 2 Muster * 2 KWs * 2 Verkehrstage = 8
 
         // ----- 2. Anfrage-Daten definieren und Anfrage erstellen -----
         const zeitraum_E2 = {
@@ -2534,10 +2697,10 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         const anfrageData_E2 = {
             Zugnummer: "E2_MultiSegment", EVU: "EVU_MS",
             ListeGewuenschterSlotAbschnitte: [
-                { von: "A", bis: "B", Abfahrtszeit: { stunde: gemeinsamerAbschnittParams.AbfahrtStunde, minute: 0 }, Ankunftszeit: { stunde: gemeinsamerAbschnittParams.AnkunftStunde, minute: 0 } },
-                { von: "B", bis: "C", Abfahrtszeit: { stunde: gemeinsamerAbschnittParams.AbfahrtStunde, minute: 0 }, Ankunftszeit: { stunde: gemeinsamerAbschnittParams.AnkunftStunde, minute: 0 } }
+                { von: "A", bis: "B", Abfahrtszeit: { stunde: 8, minute: 0 }, Ankunftszeit: { stunde: 9, minute: 0 } },
+                { von: "B", bis: "C", Abfahrtszeit: { stunde: 9, minute: 2 }, Ankunftszeit: { stunde: 9, minute: 50 } }
             ],
-            Verkehrsart: gemeinsamerAbschnittParams.Verkehrsart,
+            Verkehrsart: "SPFV",
             Verkehrstag: anfrageVerkehrstag_E2,
             Zeitraum: zeitraum_E2,
             Email: "e2@test.com",
@@ -2570,7 +2733,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         expect(aktualisierteAnfrage_E2.ZugewieseneSlots).toHaveLength(8);
         // Stelle sicher, dass alle erstellten Slot-IDs in den ZugewiesenenSlots der Anfrage sind
         // und den korrekten Initialstatus haben
-        for (const erstellterSlot of erstellteSlotObjekte) {
+        for (const erstellterSlot of erstellteElternSlots) {
             const zuweisungEintrag = aktualisierteAnfrage_E2.ZugewieseneSlots.find(
                 zs => zs.slot.toString() === erstellterSlot._id.toString()
             );
@@ -2580,7 +2743,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
 
         // 4.3 (Optional/Sekundär) Überprüfung der Kapazitätstöpfe und Slot-Verknüpfungen
         const zugewieseneTopfIdsInAnfrage = new Set();
-        for (const slot of erstellteSlotObjekte) {
+        for (const slot of erstellteElternSlots) {
              if(slot.VerweisAufTopf) zugewieseneTopfIdsInAnfrage.add(slot.VerweisAufTopf.toString());
         }
         expect(zugewieseneTopfIdsInAnfrage.size).toBe(8); // Erwartet 8 verschiedene Töpfe
@@ -2589,7 +2752,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
             const topf = await Kapazitaetstopf.findById(topfId);
             expect(topf.ListeDerAnfragen.map(id => id.toString())).toContain(anfrage_E2._id.toString());
         }
-        for (const slot of erstellteSlotObjekte) {
+        for (const slot of erstellteElternSlots) {
             const slot_final = await Slot.findById(slot._id);
             expect(slot_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrage_E2._id.toString());
         }
@@ -2600,47 +2763,72 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         const grundentgelt_AB = 100;
         const grundentgelt_BC = 50;
 
-        const slotDefinitionen1 = [
-            // Abschnitt A->B
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 1, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
-            { von: "A", bis: "B", Abschnitt: "AB_Strecke", Kalenderwoche: 2, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_AB, Verkehrsart: "SPFV", AbfahrtStunde: 22, AnkunftStunde: 23 },
-            ];
-        const slotDefinitionen2 = [
-            // Abschnitt B->C
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 1, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 1, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 2, Verkehrstag: "Mo-Fr", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
-            { von: "B", bis: "C", Abschnitt: "BC_Strecke", Kalenderwoche: 2, Verkehrstag: "Sa+So", Grundentgelt: grundentgelt_BC, Verkehrsart: "SPFV", AbfahrtStunde: 23, AnkunftStunde: 0 },
+        const slotPatterns = [
+            // Muster 1: Ein Tages-Slot
+            {
+                elternSlotTyp: "TAG",
+                alternative: {
+                    von: "A", 
+                    bis: "B", 
+                    Abschnitt: "AB_Strecke",
+                    Abfahrt: { stunde: 22, minute: 0 }, 
+                    Ankunft: { stunde: 23, minute: 0 },
+                    Verkehrsart: "SPFV", 
+                    Grundentgelt: grundentgelt_AB
+                }
+            },
+            // Muster 2: Ein Nacht-Slot
+            {
+                elternSlotTyp: "NACHT",
+                alternative: {
+                    von: "B", 
+                    bis: "C", 
+                    Abschnitt: "BC_Strecke",
+                    Zeitfenster: '23-01',
+                    Mindestfahrzeit: 60,
+                    Maximalfahrzeit: 70,
+                    Grundentgelt: grundentgelt_BC,
+                    Verkehrsart: 'ALLE'
+                }
+            }
         ];
 
-        const erstellteSlotObjekte = [];
-        for (const def of slotDefinitionen1) {
-            const slotData = {
-                slotTyp: 'TAG',
-                von: def.von, bis: def.bis, Abschnitt: def.Abschnitt,
-                Abfahrt: { stunde: def.AbfahrtStunde, minute: 0 }, Ankunft: { stunde: def.AnkunftStunde, minute: 0 },
-                Verkehrstag: def.Verkehrstag, Kalenderwoche: def.Kalenderwoche, Verkehrsart: def.Verkehrsart, Grundentgelt: def.Grundentgelt
-            };
-            const response = await request(app).post('/api/slots').send(slotData);
-            expect(response.status).toBe(201);
-            erstellteSlotObjekte.push(response.body.data);
+        // Definiere die variablen Eigenschaften
+        const kalenderwochen = [1, 2];
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
+
+        const erstellteElternSlots = [];
+
+        // ----- 2. Erstelle alle 8 Slot-Gruppen in einer verschachtelten Schleife -----
+
+        for (const pattern of slotPatterns) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
+
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
+
+                    // Überprüfe die Antwort direkt in der Schleife
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
+            }
         }
-        for (const def of slotDefinitionen2) {
-            const slotData = {
-                slotTyp: 'NACHT',
-                von: def.von, bis: def.bis, Abschnitt: def.Abschnitt,
-                Zeitfenster: '23-01',
-                Mindestfahrzeit: 60,
-                Maximalfahrzeit: 70,
-                Verkehrstag: def.Verkehrstag, Kalenderwoche: def.Kalenderwoche, Grundentgelt: def.Grundentgelt
-            };
-            const response = await request(app).post('/api/slots').send(slotData);
-            expect(response.status).toBe(201);
-            erstellteSlotObjekte.push(response.body.data);
-        }
-        expect(erstellteSlotObjekte).toHaveLength(8);
+
+        // Finale Prüfung, ob alles korrekt erstellt wurde
+        expect(erstellteElternSlots).toHaveLength(8); // 2 Muster * 2 KWs * 2 Verkehrstage = 8
 
         // ----- 2. Anfrage-Daten definieren und Anfrage erstellen -----
         const zeitraum_E2 = {
@@ -2667,7 +2855,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         expect(anfrageErstelltResponse.status).toBe(201);
         const anfrage_E2 = anfrageErstelltResponse.body.data;
         anfrageErstellt = await Anfrage.findById(anfrage_E2._id);
-        console.log(anfrageErstellt);
+        //console.log(anfrageErstellt);
         anfrageErstellt.Status = 'validiert';
         await anfrageErstellt.save();
         expect(anfrageErstellt.Status).toBe("validiert");
@@ -2690,7 +2878,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
         expect(aktualisierteAnfrage_E2.ZugewieseneSlots).toHaveLength(8);
         // Stelle sicher, dass alle erstellten Slot-IDs in den ZugewiesenenSlots der Anfrage sind
         // und den korrekten Initialstatus haben
-        for (const erstellterSlot of erstellteSlotObjekte) {
+        for (const erstellterSlot of erstellteElternSlots) {
             const zuweisungEintrag = aktualisierteAnfrage_E2.ZugewieseneSlots.find(
                 zs => zs.slot.toString() === erstellterSlot._id.toString()
             );
@@ -2700,7 +2888,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
 
         // 4.3 (Optional/Sekundär) Überprüfung der Kapazitätstöpfe und Slot-Verknüpfungen
         const zugewieseneTopfIdsInAnfrage = new Set();
-        for (const slot of erstellteSlotObjekte) {
+        for (const slot of erstellteElternSlots) {
              if(slot.VerweisAufTopf) zugewieseneTopfIdsInAnfrage.add(slot.VerweisAufTopf.toString());
         }
         expect(zugewieseneTopfIdsInAnfrage.size).toBe(8); // Erwartet 8 verschiedene Töpfe
@@ -2709,7 +2897,7 @@ describe('Entgeltberechnung im Zuordnungsprozess', () => {
             const topf = await Kapazitaetstopf.findById(topfId);
             expect(topf.ListeDerAnfragen.map(id => id.toString())).toContain(anfrage_E2._id.toString());
         }
-        for (const slot of erstellteSlotObjekte) {
+        for (const slot of erstellteElternSlots) {
             const slot_final = await Slot.findById(slot._id);
             expect(slot_final.zugewieseneAnfragen.map(id => id.toString())).toContain(anfrage_E2._id.toString());
         }

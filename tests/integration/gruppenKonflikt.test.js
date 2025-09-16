@@ -52,39 +52,62 @@ describe('Gruppierte Topf-Konfliktlösung', () => {
             await collection.deleteMany({});
         }
 
-        // 1. Slots und Kapazitätstöpfe erstellen
-        // Wir erstellen für 3 Wochen (KW 1, 2, 3) jeweils einen Mo-Fr und einen Sa+So Slot
-        // für denselben Abschnitt. Das sind 6 Slot-Muster, die 6 Töpfe erzeugen.
-        // Jeder Topf hat eine maxKapazitaet von 1 (erstellt durch 2 Slots pro Topf-Definition).
-        const commonSlotParams1 = {
-            slotTyp: "TAG",
-            von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke1",
-            Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
-            Grundentgelt: grundentgelt
-        };
+        // Wir definieren die 6 einzigartigen fahrbaren Wege (Kind-Slots)
+        const patternsToCreate = [
+            // 3 Muster für Abschnitt "Gruppen-Strecke1"
+            { elternSlotTyp: 'TAG', alternative: { von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke1", Verkehrsart: "SPFV", Grundentgelt: grundentgelt, Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 } } },
+            { elternSlotTyp: 'TAG', alternative: { von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke1", Verkehrsart: "SPFV", Grundentgelt: grundentgelt, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } } },
+            { elternSlotTyp: 'TAG', alternative: { von: "Gruppenstadt-A", bis: "Gruppenstadt-B", Abschnitt: "Gruppen-Strecke1", Verkehrsart: "SPFV", Grundentgelt: grundentgelt, Abfahrt: { stunde: 9, minute: 20 }, Ankunft: { stunde: 10, minute: 20 } } },
+            // 3 Muster für Abschnitt "Gruppen-Strecke2"
+            { elternSlotTyp: 'TAG', alternative: { von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abschnitt: "Gruppen-Strecke2", Verkehrsart: "SPFV", Grundentgelt: grundentgelt, Abfahrt: { stunde: 10, minute: 0 }, Ankunft: { stunde: 11, minute: 0 } } },
+            { elternSlotTyp: 'TAG', alternative: { von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abschnitt: "Gruppen-Strecke2", Verkehrsart: "SPFV", Grundentgelt: grundentgelt, Abfahrt: { stunde: 10, minute: 10 }, Ankunft: { stunde: 11, minute: 10 } } },
+            { elternSlotTyp: 'TAG', alternative: { von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abschnitt: "Gruppen-Strecke2", Verkehrsart: "SPFV", Grundentgelt: grundentgelt, Abfahrt: { stunde: 10, minute: 20 }, Ankunft: { stunde: 11, minute: 20 } } },
+        ];
 
-        const commonSlotParams2 = {
-            slotTyp: "TAG",
-            von: "Gruppenstadt-B", bis: "Gruppenstadt-C", Abschnitt: "Gruppen-Strecke2",
-            Verkehrsart: "SPFV", Abfahrt: { stunde: 10, minute: 0 }, Ankunft: { stunde: 11, minute: 0 },
-            Grundentgelt: grundentgelt
-        };
+        const kalenderwochen = Array.from({ length: anzahlWochen }, (_, i) => i + 1); // Erzeugt [1, 2, 3]
+        const verkehrstage = ["Mo-Fr", "Sa+So"];
+        const erstellteElternSlots = [];
 
-        for (let kw = 1; kw <= anzahlWochen; kw++) {
-            for (const vt of ["Mo-Fr", "Sa+So"]) {
-                // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Verkehrstag: vt });
-                await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Verkehrstag: vt });
-                await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });
-                await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 10, minute: 10 }, Ankunft: { stunde: 11, minute: 10 } });
-                await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 9, minute: 20 }, Ankunft: { stunde: 10, minute: 20 } });
-                await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Verkehrstag: vt, Abfahrt: { stunde: 10, minute: 20 }, Ankunft: { stunde: 11, minute: 20 } });                
+        // ----- 2. Erstelle alle 36 Slot-Gruppen in verschachtelten Schleifen -----
+
+        for (const pattern of patternsToCreate) {
+            for (const kw of kalenderwochen) {
+                for (const vt of verkehrstage) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: vt,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [
+                            pattern.alternative
+                        ]
+                    };
+
+                    // Sende den Payload an den API-Endpunkt
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
+
+                    expect(response.status).toBe(201);
+                    erstellteElternSlots.push(response.body.data);
+                }
             }
         }
-        erstellteSlots = await Slot.find({});
-        expect(erstellteSlots.length).toBe(36); //3 Slots in 3 Wochen auf 2 Abschitten in den 2 Töpfen Mo-Fr und Sa+So sind 36 Slots insgesamt
+
+        // ----- 3. Finale Überprüfung -----
+        const alleSlotsDB = await Slot.find({});
+        // Es sollten 36 Eltern-Slots und 36 Kind-Slots erstellt worden sein
+        expect(alleSlotsDB.filter(s => s.slotStrukturTyp === 'ELTERN')).toHaveLength(36);
+        expect(alleSlotsDB.filter(s => s.slotStrukturTyp === 'KIND')).toHaveLength(36);
+
+        // Überprüfe stichprobenartig einen der erstellten Kapazitätstöpfe
         const topfCheck = await Kapazitaetstopf.findOne({ Abschnitt: "Gruppen-Strecke1", Kalenderwoche: 1, Verkehrstag: "Mo-Fr" });
-        expect(topfCheck.maxKapazitaet).toBe(2); // floor(0.7*3) = 2
+        expect(topfCheck).toBeDefined();
+        // In diesem Topf sollten 3 Eltern-Slots sein
+        expect(topfCheck.ListeDerSlots).toHaveLength(3);
+        // Die Kapazität sollte korrekt berechnet sein
+        expect(topfCheck.maxKapazitaet).toBe(2); // floor(0.7 * 3) = 2
 
         // 2. Vier Anfragen erstellen, die alle "täglich" über 3 Wochen verkehren
         const anfrageZeitraum = {
@@ -156,7 +179,7 @@ describe('Gruppierte Topf-Konfliktlösung', () => {
     });
 
     // ----- TEST 2: GRUPPEN-KONFLIKTLÖSUNG (PHASE 1) -----
-    it('sollte eine Gruppenentscheidung (Verzicht) korrekt auf alle 12 Topf-Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung Verzicht korrekt auf alle 12 Topf-Konflikte anwenden und diese loesen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -206,7 +229,7 @@ describe('Gruppierte Topf-Konfliktlösung', () => {
     });
 
     // ----- TEST 3: GRUPPEN-KONFLIKTLÖSUNG (PHASE 2 Entgeltvergleich mit eindeutigem Ergebnis) -----
-    it('sollte eine Gruppenentscheidung (Entgeltvergleich eindeutig) korrekt auf alle 12 Topf-Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung Entgeltvergleich eindeutig korrekt auf alle 12 Topf-Konflikte anwenden und diese loesen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -286,7 +309,7 @@ describe('Gruppierte Topf-Konfliktlösung', () => {
     });
 
     // ----- TEST 4: GRUPPEN-KONFLIKTLÖSUNG (PHASE 2 Entgeltvergleich führt zu Höchstpreisverfahren) -----
-    it('sollte eine Gruppenentscheidung (Entgeltvergleich Gleichstand) korrekt auf alle 12 Topf-Konflikte anwenden und diese als ungelöst markieren', async () => {
+    it('sollte eine Gruppenentscheidung Entgeltvergleich Gleichstand korrekt auf alle 12 Topf-Konflikte anwenden und diese als ungeloest markieren', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -376,7 +399,7 @@ describe('Gruppierte Topf-Konfliktlösung', () => {
     });
 
     // ----- TEST 5: GRUPPEN-KONFLIKTLÖSUNG (PHASE 3 Durchführung Höchstpreisverfahren) -----
-    it('sollte eine Gruppenentscheidung (Höchstpreisverfahren) korrekt auf alle 12 Topf-Konflikte anwenden und diese lösen', async () => {
+    it('sollte eine Gruppenentscheidung Hoechstpreisverfahren korrekt auf alle 12 Topf-Konflikte anwenden und diese loesen', async () => {
         // Setup: Holen der gruppenId
         const gruppenResp = await request(app).get('/api/konflikte/gruppen').send();
         //console.log(gruppenResp.body);        
@@ -519,36 +542,106 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             }
         });
 
-        it('sollte den Gruppenstatus auf "invalide" setzen, wenn die Einzelkonflikte bei gleicher Kapazität der Töpfe unterschiedliche Status haben', async () => {
+        it('sollte den Gruppenstatus auf invalide setzen, wenn die Einzelkonflikte bei gleicher Kapazitaet der Toepfe unterschiedliche Status haben', async () => {
             // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichem Status ----
 
-            const commonSlotParams1 = {
-                slotTyp: "TAG",
-                von: "S", bis: "T", Abschnitt: "Sued",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
-                Grundentgelt: 150, Verkehrstag: "Mo-Fr"
+            // Die zwei unterschiedlichen KIND-Muster, die wir erstellen wollen
+            const kindPatterns = [
+                {
+                    von: "S", bis: "T", Abschnitt: "Sued",
+                    Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
+                    Verkehrsart: "SPFV", Grundentgelt: 150
+                },
+                {
+                    von: "S", bis: "T", Abschnitt: "Sued",
+                    Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 },
+                    Verkehrsart: "SPFV", Grundentgelt: 150
+                }
+            ];
+
+            // Definiere die variablen Eigenschaften
+            const kalenderwochen = [11, 12];
+            const verkehrstag = "Mo-Fr";
+
+            // Ein Objekt, um die erstellten Slots für den zweiten Teil des Tests leicht zu finden
+            const erstellteSlots = {};
+
+            // ----- 2. Erstelle die 4 Slot-Gruppen (2 Muster * 2 KWs) in einer Schleife -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp: "TAG",
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: "Sued",
+                        alternativen: [pattern]
+                    };
+
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+                    
+                    // Speichere den zurückgegebenen Eltern-Slot (populiert mit dem Kind) für den nächsten Schritt
+                    // Wir erstellen einen eindeutigen Schlüssel zum einfachen Wiederfinden
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteSlots).length).toBe(4);
+
+            // ----- 3. Lade die Kapazitätstöpfe (optional, zur Verifizierung) -----
+            const kt_A = await Kapazitaetstopf.findOne({ Kalenderwoche: 11, Abschnitt: "Sued" });
+            const kt_B = await Kapazitaetstopf.findOne({ Kalenderwoche: 12, Abschnitt: "Sued" });
+            expect(kt_A.ListeDerSlots).toHaveLength(2); // Beide Muster fallen in denselben Topf
+            expect(kt_B.ListeDerSlots).toHaveLength(2);
+            expect(kt_A.maxKapazitaet).toBe(1);
+            expect(kt_B.maxKapazitaet).toBe(1);
+
+            // ----- 4. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Eltern- und Kind-Slots, die von den Anfragen gewünscht werden (die um 9:00 Uhr)
+            const elternSlotKW11 = erstellteSlots['KW11_900'];
+            const kindSlotKW11_Id = elternSlotKW11.gabelAlternativen[0]._id;
+
+            const elternSlotKW12 = erstellteSlots['KW12_900'];
+            const kindSlotKW12_Id = elternSlotKW12.gabelAlternativen[0]._id;
+
+            // Bereite das ZugewieseneSlots-Array für die Anfragen vor
+            const zugewieseneSlotsFuerAnfrage = [
+                { 
+                    slot: elternSlotKW11._id, // Verweis auf den ELTERN-Slot
+                    kind: kindSlotKW11_Id,      // Verweis auf den KIND-Slot
+                    statusEinzelzuweisung: 'wartet_konflikt_topf' 
+                },
+                { 
+                    slot: elternSlotKW12._id, // Verweis auf den ELTERN-Slot
+                    kind: kindSlotKW12_Id,      // Verweis auf den KIND-Slot
+                    statusEinzelzuweisung: 'wartet_konflikt_topf' 
+                }
+            ];
+
+            const anfrageBasis = {
+                EVU: "Inv", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // KW 11 & 12
+                ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], 
+                Email: 'rv@evu.de',
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 12; kw++) {
-                
-                    // Erstelle 2 Slots pro Topf-Definition, um maxKap=1 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });             
-                
-            }
+            // Erstelle die beiden Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, 
+                Zugnummer: "X1", 
+                EVU: "Inv1",
+                ZugewieseneSlots: zugewieseneSlotsFuerAnfrage
+            }).save();
 
-            const s1 = await Slot.findOne({Kalenderwoche: 11});
-            const s2 = await Slot.findOne({Kalenderwoche: 12});
-
-            // 1. Lade die beiden Kapazitätstöpfe
-            const kt_A = await Kapazitaetstopf.findOne({Kalenderwoche: 11});
-            const kt_B = await Kapazitaetstopf.findOne({Kalenderwoche: 12});
-            
-            // 2. Erstelle zwei Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, 
+                Zugnummer: "Y1", 
+                EVU: "Inv2",
+                ZugewieseneSlots: zugewieseneSlotsFuerAnfrage 
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -617,47 +710,86 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(konfliktIdsInGruppe).toContain(kdB._id.toString());
         });
 
-        it('sollte bei zwei Kapazitätstöpfen mit unterschiedlicher Kapazität bei gleichen Anfragen zwei Gruppen bilden', async () => {
+        it('sollte bei zwei Kapazitaetstoepfen mit unterschiedlicher Kapazitaet bei gleichen Anfragen zwei Gruppen bilden', async () => {
             // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichem Kapazitäten in den Töpfen ----
 
-            const commonSlotParams1 = {
-                slotTyp: "TAG",
-                von: "S", bis: "T", Abschnitt: "Sued",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
-                Grundentgelt: 150, Verkehrstag: "Mo-Fr"
-            };
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
-            };
+            // Es gibt 2 Slot-Muster für Abschnitt "Sued" und 3 für Abschnitt "West"
+            const slotPatterns = [
+                // Abschnitt Sued (insgesamt 2 Muster)
+                { elternSlotTyp: "TAG", alternative: { von: "S", bis: "T", Abschnitt: "Sued", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 }, Verkehrsart: "SPFV", Grundentgelt: 150 } },
+                { elternSlotTyp: "TAG", alternative: { von: "S", bis: "T", Abschnitt: "Sued", Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 }, Verkehrsart: "SPFV", Grundentgelt: 150 } },
+                // Abschnitt West (insgesamt 3 Muster)
+                { elternSlotTyp: "TAG", alternative: { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 } },
+                { elternSlotTyp: "TAG", alternative: { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 } },
+                { elternSlotTyp: "TAG", alternative: { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 } },
+            ];
 
-            for (let kw = 11; kw <= 12; kw++) {
-                
-                    // Erstelle 2 bzw. 3 Slots pro Topf-Definition, um maxKap=1 bzw. =2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });  
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
+            const kalenderwochen = [11, 12];
+            const verkehrstag = "Mo-Fr";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 10 Slot-Gruppen (5 Muster * 2 KWs) -----
+
+            for (const pattern of slotPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [pattern.alternative]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    // Speichere den Eltern-Slot mit einem eindeutigen Schlüssel
+                    const key = `${pattern.alternative.Abschnitt}_KW${kw}_${pattern.alternative.Abfahrt.stunde}${String(pattern.alternative.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
             }
+            expect(Object.keys(erstellteElternSlots).length).toBe(10); // 5 Muster * 2 KWs
 
-            const s1 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 11});
-            const s2 = await Slot.findOne({Abschnitt: 'Sued', Kalenderwoche: 11});
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
 
-            // 1. Lade die beiden Kapazitätstöpfe
-            const kt_A = await Kapazitaetstopf.findOne({bschnitt: 'West', Kalenderwoche: 11});
-            const kt_B = await Kapazitaetstopf.findOne({Kbschnitt: 'Sued', Kalenderwoche: 11});
-            
-            // 2. Erstelle zwei Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv5", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            // Finde die spezifischen Eltern- und Kind-Slots für die Anfragen
+            // Anfragen wollen X->S um 8:00 und S->T um 9:00 in KW 11 und KW 12
+            const elternSlot_West_KW11 = erstellteElternSlots['West_KW11_800'];
+            const kindSlot_West_KW11_Id = elternSlot_West_KW11.gabelAlternativen[0]._id;
+            const elternSlot_Sued_KW11 = erstellteElternSlots['Sued_KW11_900'];
+            const kindSlot_Sued_KW11_Id = elternSlot_Sued_KW11.gabelAlternativen[0]._id;
+
+            // Da die Anfragen über mehrere KWs gehen, brauchen wir auch die Slots aus KW12
+            const elternSlot_West_KW12 = erstellteElternSlots['West_KW12_800'];
+            const kindSlot_West_KW12_Id = elternSlot_West_KW12.gabelAlternativen[0]._id;
+            const elternSlot_Sued_KW12 = erstellteElternSlots['Sued_KW12_900'];
+            const kindSlot_Sued_KW12_Id = elternSlot_Sued_KW12.gabelAlternativen[0]._id;
+
+            // Bereite das ZugewieseneSlots-Array für die Anfragen vor
+            const zugewieseneSlotsFuerAnfrage = [
+                { slot: elternSlot_West_KW11._id, kind: kindSlot_West_KW11_Id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_Sued_KW11._id, kind: kindSlot_Sued_KW11_Id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_West_KW12._id, kind: kindSlot_West_KW12_Id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_Sued_KW12._id, kind: kindSlot_Sued_KW12_Id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+            ];
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // KW 11 & 12
+                ListeGewuenschterSlotAbschnitte: [
+                    {von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}},
+                    {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}
+                ], 
+                Email: 'rv@evu.de',
+                Status: 'validiert',
+                ZugewieseneSlots: zugewieseneSlotsFuerAnfrage
+            };
+
+            // Erstelle die drei Anfragen
+            await new Anfrage({ ...anfrageBasis, Zugnummer: "X1", EVU: "Inv3" }).save();
+            await new Anfrage({ ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv4" }).save();
+            await new Anfrage({ ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv5" }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -687,45 +819,91 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(anzahlGruppen).toBe(2);
         });
 
-        it('sollte den Status der Gruppe und der Anfragen auch bei mehrmaliger Konfliktanalyse (Topf-Konflikte) korrekt beibehalten', async () => {
+        it('sollte den Status der Gruppe und der Anfragen auch bei mehrmaliger Konfliktanalyse Topf-Konflikte korrekt beibehalten', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfrage, die bis zum Höchstpreis kommen ----
 
             
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Die drei leicht unterschiedlichen KIND-Muster für den Abschnitt "West"
+            const kindPatterns = [
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 }
+            ];
+
+            const kalenderwochen = [11, 12, 13];
+            const verkehrstag = "Mo-Fr";
+            const elternSlotTyp = "TAG";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 9 Slot-Gruppen (3 Muster * 3 KWs) -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: "West",
+                        alternativen: [pattern]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(9);
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (Abfahrt 8:00) für die Anfragen in den jeweiligen KWs
+            const elternSlot_KW11 = erstellteElternSlots['KW11_800'];
+            const elternSlot_KW12 = erstellteElternSlots['KW12_800'];
+            const elternSlot_KW13 = erstellteElternSlots['KW13_800'];
+
+            // Bereite die ZugewieseneSlots-Arrays für die verschiedenen Anfragen vor
+            const zugewieseneSlots_3Wochen = [
+                { slot: elternSlot_KW11._id, kind: elternSlot_KW11.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW12._id, kind: elternSlot_KW12.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW13._id, kind: elternSlot_KW13.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+            ];
+            const zugewieseneSlots_2Wochen = zugewieseneSlots_3Wochen.slice(0, 2); // Nur KW 11 & 12
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}],
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 13; kw++) {
-                
-                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
-            }
+            // Erstelle die vier Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "X1", EVU: "Inv1", Email: 'rv@evu1.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, // 3 Wochen
+                ZugewieseneSlots: zugewieseneSlots_3Wochen
+            }).save();
 
-            const s11 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 11});
-            const s12 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 12});
-            const s13 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 13});
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv2", Email: 'rv@evu2.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen 
+            }).save();
 
-            // 1. Lade die drei Kapazitätstöpfe
-            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'West', Kalenderwoche: 11});
-            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'West', Kalenderwoche: 12});
-            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'West', Kalenderwoche: 13});
-            
-            // 2. Erstelle 4 Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv3", Email: 'rv@evu3.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "V1", EVU: "Inv4", Email: 'rv@evu4.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -947,45 +1125,91 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_verzichtet');
         });
 
-        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 1', async () => {
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt beruecksichtigen Fall 1', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
 
             
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "Nord-West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Die drei leicht unterschiedlichen KIND-Muster für den Abschnitt "Nord-West"
+            const kindPatterns = [
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 }
+            ];
+
+            const kalenderwochen = [11, 12, 13];
+            const verkehrstag = "Mo-Fr";
+            const elternSlotTyp = "TAG";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 9 Slot-Gruppen (3 Muster * 3 KWs) -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.Abschnitt,
+                        alternativen: [pattern]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(9);
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (Abfahrt 8:00) für die Anfragen in den jeweiligen KWs
+            const elternSlot_KW11 = erstellteElternSlots['KW11_800'];
+            const elternSlot_KW12 = erstellteElternSlots['KW12_800'];
+            const elternSlot_KW13 = erstellteElternSlots['KW13_800'];
+
+            // Bereite die ZugewieseneSlots-Arrays für die verschiedenen Anfragen vor
+            const zugewieseneSlots_3Wochen = [
+                { slot: elternSlot_KW11._id, kind: elternSlot_KW11.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW12._id, kind: elternSlot_KW12.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW13._id, kind: elternSlot_KW13.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+            ];
+            const zugewieseneSlots_2Wochen = zugewieseneSlots_3Wochen.slice(0, 2); // Nur KW 11 & 12
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}],
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 13; kw++) {
-                
-                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
-            }
+            // Erstelle die vier Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "X1", EVU: "Inv1", Email: 'rv@evu1.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, // 3 Wochen
+                ZugewieseneSlots: zugewieseneSlots_3Wochen
+            }).save();
 
-            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
-            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
-            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv1", Email: 'rv@evu2.de', // Selbes EVU
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen 
+            }).save();
 
-            // 1. Lade die drei Kapazitätstöpfe
-            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
-            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
-            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
-            
-            // 2. Erstelle 4 Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv3", Email: 'rv@evu3.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "V1", EVU: "Inv4", Email: 'rv@evu4.de',
+                Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, // Anderer Starttag, aber 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -1122,45 +1346,91 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_entgelt');
         });
 
-        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 2', async () => {
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt beruecksichtigen Fall 2', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
 
             
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "Nord-West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Die drei leicht unterschiedlichen KIND-Muster für den Abschnitt "Nord-West"
+            const kindPatterns = [
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 }
+            ];
+
+            const kalenderwochen = [11, 12, 13];
+            const verkehrstag = "Mo-Fr";
+            const elternSlotTyp = "TAG";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 9 Slot-Gruppen (3 Muster * 3 KWs) -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.Abschnitt,
+                        alternativen: [pattern]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(9);
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (Abfahrt 8:00) für die Anfragen in den jeweiligen KWs
+            const elternSlot_KW11 = erstellteElternSlots['KW11_800'];
+            const elternSlot_KW12 = erstellteElternSlots['KW12_800'];
+            const elternSlot_KW13 = erstellteElternSlots['KW13_800'];
+
+            // Bereite die ZugewieseneSlots-Arrays für die verschiedenen Anfragen vor
+            const zugewieseneSlots_3Wochen = [
+                { slot: elternSlot_KW11._id, kind: elternSlot_KW11.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW12._id, kind: elternSlot_KW12.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW13._id, kind: elternSlot_KW13.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+            ];
+            const zugewieseneSlots_2Wochen = zugewieseneSlots_3Wochen.slice(0, 2); // Nur KW 11 & 12
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}],
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 13; kw++) {
-                
-                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
-            }
+            // Erstelle die vier Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "X1", EVU: "Inv1", Email: 'rv@evu1.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, // 3 Wochen
+                ZugewieseneSlots: zugewieseneSlots_3Wochen
+            }).save();
 
-            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
-            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
-            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv3", Email: 'rv@evu2.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen 
+            }).save();
 
-            // 1. Lade die drei Kapazitätstöpfe
-            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
-            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
-            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
-            
-            // 2. Erstelle 4 Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv3", Email: 'rv@evu3.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "V1", EVU: "Inv4", Email: 'rv@evu4.de',
+                Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, // Anderer Starttag, aber 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -1296,45 +1566,91 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('abgelehnt_topf_entgelt');
         });
 
-        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 3', async () => {
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt beruecksichtigen Fall 3', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
 
             
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "Nord-West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Die drei leicht unterschiedlichen KIND-Muster für den Abschnitt "Nord-West"
+            const kindPatterns = [
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 }
+            ];
+
+            const kalenderwochen = [11, 12, 13];
+            const verkehrstag = "Mo-Fr";
+            const elternSlotTyp = "TAG";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 9 Slot-Gruppen (3 Muster * 3 KWs) -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.Abschnitt,
+                        alternativen: [pattern]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(9);
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (Abfahrt 8:00) für die Anfragen in den jeweiligen KWs
+            const elternSlot_KW11 = erstellteElternSlots['KW11_800'];
+            const elternSlot_KW12 = erstellteElternSlots['KW12_800'];
+            const elternSlot_KW13 = erstellteElternSlots['KW13_800'];
+
+            // Bereite die ZugewieseneSlots-Arrays für die verschiedenen Anfragen vor
+            const zugewieseneSlots_3Wochen = [
+                { slot: elternSlot_KW11._id, kind: elternSlot_KW11.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW12._id, kind: elternSlot_KW12.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW13._id, kind: elternSlot_KW13.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+            ];
+            const zugewieseneSlots_2Wochen = zugewieseneSlots_3Wochen.slice(0, 2); // Nur KW 11 & 12
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}],
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 13; kw++) {
-                
-                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
-            }
+            // Erstelle die vier Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "X1", EVU: "Inv1", Email: 'rv@evu1.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, // 3 Wochen
+                ZugewieseneSlots: zugewieseneSlots_3Wochen
+            }).save();
 
-            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
-            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
-            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv2", Email: 'rv@evu2.de', // Anderes EVU
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen 
+            }).save();
 
-            // 1. Lade die drei Kapazitätstöpfe
-            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
-            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
-            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
-            
-            // 2. Erstelle 4 Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "V1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv2", Email: 'rv@evu3.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "V1", EVU: "Inv1", Email: 'rv@evu4.de',
+                Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, // Anderer Starttag, aber 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -1466,45 +1782,91 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(anfrage_V.ZugewieseneSlots[0].statusEinzelzuweisung).toBe('bestaetigt_topf_entgelt');
         });
 
-        it('sollte den max Marktanteil beim Entgeltvergleich korrekt berücksichtigen Fall 4', async () => {
+        it('sollte den max Marktanteil beim Entgeltvergleich korrekt beruecksichtigen Fall 4', async () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 2 Kapazitäten und 4 Anfragen, die bis zum Entgeltvergleich kommen ----
 
             
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "Nord-West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Die drei leicht unterschiedlichen KIND-Muster für den Abschnitt "Nord-West"
+            const kindPatterns = [
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "Nord-West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 }
+            ];
+
+            const kalenderwochen = [11, 12, 13];
+            const verkehrstag = "Mo-Fr";
+            const elternSlotTyp = "TAG";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 9 Slot-Gruppen (3 Muster * 3 KWs) -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.Abschnitt,
+                        alternativen: [pattern]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(9);
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (Abfahrt 8:00) für die Anfragen in den jeweiligen KWs
+            const elternSlot_KW11 = erstellteElternSlots['KW11_800'];
+            const elternSlot_KW12 = erstellteElternSlots['KW12_800'];
+            const elternSlot_KW13 = erstellteElternSlots['KW13_800'];
+
+            // Bereite die ZugewieseneSlots-Arrays für die verschiedenen Anfragen vor
+            const zugewieseneSlots_3Wochen = [
+                { slot: elternSlot_KW11._id, kind: elternSlot_KW11.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW12._id, kind: elternSlot_KW12.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW13._id, kind: elternSlot_KW13.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+            ];
+            const zugewieseneSlots_2Wochen = zugewieseneSlots_3Wochen.slice(0, 2); // Nur KW 11 & 12
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}],
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 13; kw++) {
-                
-                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
-            }
+            // Erstelle die vier Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "X1", EVU: "Inv1", Email: 'rv@evu1.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, // 3 Wochen
+                ZugewieseneSlots: zugewieseneSlots_3Wochen
+            }).save();
 
-            const s11 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 11});
-            const s12 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 12});
-            const s13 = await Slot.findOne({Abschnitt: 'Nord-West', Kalenderwoche: 13});
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv1", Email: 'rv@evu1.de', // Selbes EVU wie erste Anfrage
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen 
+            }).save();
 
-            // 1. Lade die drei Kapazitätstöpfe
-            const kt_11 = await Kapazitaetstopf.findOne({bschnitt: 'Nord-West', Kalenderwoche: 11});
-            const kt_12 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 12});
-            const kt_13 = await Kapazitaetstopf.findOne({Kbschnitt: 'Nord-West', Kalenderwoche: 13});
-            
-            // 2. Erstelle 4 Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv1", Email: 'rv@evu1.de', // Selbes EVU wie erste Anfrage
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "V1", EVU: "Inv4", Email: 'rv@evu4.de',
+                Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, // Anderer Starttag, aber 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
@@ -1667,35 +2029,76 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
                 await collection.deleteMany({});
             }
 
-            // 6 Slots für Abschn1 pro Woche erstellen, um maxKapazitaet = floor(0.7*6) = 4 zu erhalten
-            const slotBasis = { slotTyp: "TAG", von: "Y", bis: "Z", Abschnitt: "Abschn1", 
-                                    Verkehrstag: "Sa+So", Verkehrsart: "SPFV",
-                                    Grundentgelt: 150 
-                                };
-                                
-            let s1 = await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 2, Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 2, Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 2, Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 2, Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 2, Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 2, Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } });
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 3, Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 3, Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 3, Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 3, Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 3, Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 3, Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } });
+            // Gemeinsame Daten für den ELTERN-Teil der Slot-Gruppen
+            const elternData = {
+                elternSlotTyp: "TAG",
+                Verkehrstag: "Sa+So",
+            };
 
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 4, Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 4, Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 4, Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 4, Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 4, Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } });
-            await request(app).post('/api/slots').send({ ...slotBasis, Kalenderwoche: 4, Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } });
+            // Gemeinsame Daten für den KIND-Teil der Slot-Gruppen
+            const commonKindData = {
+                von: "Y", 
+                bis: "Z", 
+                Abschnitt: "Abschn1",
+                Verkehrsart: "SPFV", 
+                Grundentgelt: 150
+            };
 
-            let kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
-            expect(kt_DetectConflict.maxKapazitaet).toBe(4);
+            // Die sechs leicht unterschiedlichen Zeit-Muster, die wir erstellen wollen
+            const zeitAlternativen = [
+                { Abfahrt: { stunde: 13, minute: 10 }, Ankunft: { stunde: 14, minute: 0 } },
+                { Abfahrt: { stunde: 13, minute: 20 }, Ankunft: { stunde: 14, minute: 10 } },
+                { Abfahrt: { stunde: 13, minute: 30 }, Ankunft: { stunde: 14, minute: 20 } },
+                { Abfahrt: { stunde: 13, minute: 40 }, Ankunft: { stunde: 14, minute: 30 } },
+                { Abfahrt: { stunde: 13, minute: 50 }, Ankunft: { stunde: 14, minute: 40 } },
+                { Abfahrt: { stunde: 14, minute: 0 }, Ankunft: { stunde: 14, minute: 50 } }
+            ];
+
+            const kalenderwochen = [2, 3, 4];
+            let topfIdFuerTest;
+
+            // ----- 2. Erstelle alle 18 Slot-Gruppen in verschachtelten Schleifen -----
+
+            for (const kw of kalenderwochen) {
+                let topfIdDieserWoche = null;
+                for (const zeiten of zeitAlternativen) {
+                    // Baue den korrekten, verschachtelten Payload für die API
+                    const payload = {
+                        ...elternData,
+                        Kalenderwoche: kw,
+                        Abschnitt: commonKindData.Abschnitt,
+                        alternativen: [{
+                            ...commonKindData,
+                            ...zeiten 
+                        }]
+                    };
+
+                    const response = await request(app)
+                        .post('/api/slots')
+                        .send(payload);
+
+                    expect(response.status).toBe(201);
+
+                    // Merke dir die ID des Topfes (ist für alle Slots einer KW dieselbe)
+                    if (!topfIdDieserWoche) {
+                        topfIdDieserWoche = response.body.data.VerweisAufTopf;
+                    }
+                }
+                // Merke dir die ID des ersten erstellten Topfes für die finale Prüfung
+                if (!topfIdFuerTest) {
+                    topfIdFuerTest = topfIdDieserWoche;
+                }
+            }
+
+            // ----- 3. Finale Überprüfung eines repräsentativen Kapazitätstopfes -----
+            let kt_DetectConflict = await Kapazitaetstopf.findById(topfIdFuerTest);
+            expect(kt_DetectConflict).toBeDefined();
+            // Der Topf sollte 6 Eltern-Slots in seiner Liste haben
+            expect(kt_DetectConflict.ListeDerSlots).toHaveLength(6); 
+            // Die maxKapazitaet sollte korrekt berechnet sein
+            expect(kt_DetectConflict.maxKapazitaet).toBe(Math.floor(0.7 * 6)); // = 4
 
             const anfrageBasis = { Email: "conflict@evu.com", Verkehrsart: "SPFV", Verkehrstag: "Sa+So", Zeitraum: { start: "2025-01-06", ende: "2025-01-26" }, Status: 'validiert'}; // KW2-4 2025
             const anfragePromises = [];
@@ -1714,7 +2117,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             await request(app).post(`/api/anfragen/${anfragenIds[2]._id}/zuordnen`).send();
             await request(app).post(`/api/anfragen/${anfragenIds[3]._id}/zuordnen`).send();
 
-            kt_DetectConflict = await Kapazitaetstopf.findById(s1.body.data.VerweisAufTopf);
+            kt_DetectConflict = await Kapazitaetstopf.findById(kt_DetectConflict._id);
             expect(kt_DetectConflict.ListeDerAnfragen).toHaveLength(4); //kein Konflikt 4 Anfragen für 4 Kapazitäten
 
             //Erster Schritt: Topf-Konflikte
@@ -1770,7 +2173,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(beteiligteIds).toContain(anfragenIds[3]._id.toString());
         });
 
-        it('sollte korrekt Entscheidung Verzicht auf eine Konfliktgruppe mit 3 Slot-Konflikten und 4 beteiligten Anfragen durchführen', async () => {
+        it('sollte korrekt Entscheidung Verzicht auf eine Konfliktgruppe mit 3 Slot-Konflikten und 4 beteiligten Anfragen durchfuehren', async () => {
             // Aktion
             let response = await request(app).get('/api/konflikte/gruppen').send();
             //console.log(response.body);
@@ -1833,7 +2236,7 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             
         });
 
-        it('sollte korrekt den Entgeltvergleich auf eine Konfliktgruppe mit 3 Slot-Konflikten und 4 beteiligten Anfragen durchführen', async () => {
+        it('sollte korrekt den Entgeltvergleich auf eine Konfliktgruppe mit 3 Slot-Konflikten und 4 beteiligten Anfragen durchfuehren', async () => {
             // Aktion
             let response = await request(app).get('/api/konflikte/gruppen').send();
             //console.log(response.body);
@@ -2143,44 +2546,76 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
         it('sollte bei zwei Slots bei gleichen Anfragen zwei Gruppen von Slot-Konflikten bilden', async () => {
             // ---- SETUP: Erzeuge zwei Konflikte mit identischen Anfragen, aber unterschiedlichen Slots ----
 
-            const commonSlotParams1 = {
-                slotTyp: "TAG",
-                von: "S", bis: "T", Abschnitt: "Sued",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 },
-                Grundentgelt: 150, Verkehrstag: "Mo-Fr"
-            };
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
-            };
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
 
-            for (let kw = 11; kw <= 14; kw++) {
+            // Es gibt 3 Slot-Muster für Abschnitt "Sued" und 3 für Abschnitt "West"
+            const slotPatterns = [
+                // Abschnitt Sued (3 Muster)
+                { elternSlotTyp: "TAG", alternative: { von: "S", bis: "T", Abschnitt: "Sued", Abfahrt: { stunde: 9, minute: 0 }, Ankunft: { stunde: 10, minute: 0 }, Verkehrsart: "SPFV", Grundentgelt: 150 } },
+                { elternSlotTyp: "TAG", alternative: { von: "S", bis: "T", Abschnitt: "Sued", Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 }, Verkehrsart: "SPFV", Grundentgelt: 150 } },
+                { elternSlotTyp: "TAG", alternative: { von: "S", bis: "T", Abschnitt: "Sued", Abfahrt: { stunde: 9, minute: 20 }, Ankunft: { stunde: 10, minute: 20 }, Verkehrsart: "SPFV", Grundentgelt: 150 } },
+                // Abschnitt West (3 Muster)
+                { elternSlotTyp: "TAG", alternative: { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 } },
+                { elternSlotTyp: "TAG", alternative: { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 } },
+                { elternSlotTyp: "TAG", alternative: { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 } }
+            ];
+
+            const kalenderwochen = [11, 12, 13, 14];
+            const verkehrstag = "Mo-Fr";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 24 Slot-Gruppen (6 Muster * 4 KWs) -----
+
+            for (const pattern of slotPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp: pattern.elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.alternative.Abschnitt,
+                        alternativen: [pattern.alternative]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `${pattern.alternative.Abschnitt}_KW${kw}_${pattern.alternative.Abfahrt.stunde}${String(pattern.alternative.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(24); // 6 Muster * 4 KWs
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (X->S um 8:00 und S->T um 9:00) für alle KWs
+            const zugewieseneSlotsFuerAnfrage = [];
+            for (const kw of kalenderwochen) {
+                const elternSlot_West = erstellteElternSlots[`West_KW${kw}_800`];
+                const elternSlot_Sued = erstellteElternSlots[`Sued_KW${kw}_900`];
                 
-                    // Erstelle 3 Slots pro Topf-Definition, um maxKap=2 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Abfahrt: { stunde: 9, minute: 10 }, Ankunft: { stunde: 10, minute: 10 } });  
-                    await request(app).post('/api/slots').send({ ...commonSlotParams1, Kalenderwoche: kw, Abfahrt: { stunde: 9, minute: 20 }, Ankunft: { stunde: 10, minute: 20 } });  
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                
+                zugewieseneSlotsFuerAnfrage.push(
+                    { slot: elternSlot_West._id, kind: elternSlot_West.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                    { slot: elternSlot_Sued._id, kind: elternSlot_Sued.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+                );
             }
 
-            const s1 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 11});
-            const s2 = await Slot.findOne({Abschnitt: 'Sued', Kalenderwoche: 11});
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                Zeitraum: { start: "2025-03-10", ende: "2025-04-06" }, // KW 11-14
+                ListeGewuenschterSlotAbschnitte: [
+                    {von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}},
+                    {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}
+                ], 
+                Email: 'rv@evu.de',
+                Status: 'validiert',
+                ZugewieseneSlots: zugewieseneSlotsFuerAnfrage // Alle 8 Slots (2 pro KW * 4 KWs)
+            };
 
-            // 1. Lade die beiden Kapazitätstöpfe
-            const kt_A = await Kapazitaetstopf.findOne({bschnitt: 'West', Kalenderwoche: 11});
-            const kt_B = await Kapazitaetstopf.findOne({Kbschnitt: 'Sued', Kalenderwoche: 11});
-            
-            // 2. Erstelle zwei Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-04-06" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-04-06" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}, {von:"S", bis:"T", Abfahrtszeit:{stunde:9,minute:0}, Ankunftszeit:{stunde:10,minute:0}}], Email: 'rv@evu.de',
-            ZugewieseneSlots: [{slot: s1._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s2._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            
+            // Erstelle die beiden Anfragen
+            await new Anfrage({ ...anfrageBasis, Zugnummer: "X1", EVU: "Inv3" }).save();
+            await new Anfrage({ ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv4" }).save();
+
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"});
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"});
             
@@ -2222,8 +2657,8 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             expect(gruppen[1].beteiligteAnfragen.length).toBe(2);
             expect(gruppen[0].konflikteInGruppe.length).toBe(4);
             expect(gruppen[1].konflikteInGruppe.length).toBe(4);
-            const gruppenschluessel0 = `#${commonSlotParams1.von}#${commonSlotParams1.bis}#${formatTimeForID(commonSlotParams1.Abfahrt.stunde, commonSlotParams1.Abfahrt.minute)}#${commonSlotParams1.Verkehrsart}|${anfrage_X._id}#${anfrage_Y._id}`;
-            const gruppenschluessel1 = `#${commonSlotParams2.von}#${commonSlotParams2.bis}#${formatTimeForID(commonSlotParams2.Abfahrt.stunde, commonSlotParams2.Abfahrt.minute)}#${commonSlotParams2.Verkehrsart}|${anfrage_X._id}#${anfrage_Y._id}`;
+            const gruppenschluessel0 = `#${slotPatterns[0].alternative.von}#${slotPatterns[0].alternative.bis}#${formatTimeForID(slotPatterns[0].alternative.Abfahrt.stunde, slotPatterns[0].alternative.Abfahrt.minute)}#${slotPatterns[0].alternative.Verkehrsart}|${anfrage_X._id}#${anfrage_Y._id}`;
+            const gruppenschluessel1 = `#${slotPatterns[3].alternative.von}#${slotPatterns[3].alternative.bis}#${formatTimeForID(slotPatterns[3].alternative.Abfahrt.stunde, slotPatterns[3].alternative.Abfahrt.minute)}#${slotPatterns[3].alternative.Verkehrsart}|${anfrage_X._id}#${anfrage_Y._id}`;
             expect(gruppen[0].gruppenSchluessel).toBe(gruppenschluessel0);
             expect(gruppen[1].gruppenSchluessel).toBe(gruppenschluessel1);
             //console.log(gruppen[0]);
@@ -2233,44 +2668,90 @@ describe('Konfliktgruppen-Status-Synchronisation (Topf-Konflikte)', () => {
             // ---- SETUP: Erzeuge einen Konflikt mit 4 Kapazitäten und 4 Anfragen auf dem selben Slot, die bis zum Höchstpreis kommen ----
 
             
-            const commonSlotParams2 = {
-                slotTyp: "TAG",
-                von: "X", bis: "S", Abschnitt: "West",
-                Verkehrsart: "SPFV", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 },
-                Grundentgelt: 120, Verkehrstag: "Mo-Fr"
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            // Die sechs leicht unterschiedlichen KIND-Muster für den Abschnitt "West"
+            const kindPatterns = [
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 0 }, Ankunft: { stunde: 8, minute: 45 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 5 }, Ankunft: { stunde: 8, minute: 50 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 15 }, Ankunft: { stunde: 9, minute: 0 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 20 }, Ankunft: { stunde: 9, minute: 5 }, Verkehrsart: "SPFV", Grundentgelt: 120 },
+                { von: "X", bis: "S", Abschnitt: "West", Abfahrt: { stunde: 8, minute: 25 }, Ankunft: { stunde: 9, minute: 10 }, Verkehrsart: "SPFV", Grundentgelt: 120 }
+            ];
+
+            const kalenderwochen = [11, 12, 13];
+            const verkehrstag = "Mo-Fr";
+            const elternSlotTyp = "TAG";
+
+            // Ein Objekt, um die erstellten Slots für den nächsten Schritt leicht zu finden
+            const erstellteElternSlots = {};
+
+            // ----- 2. Erstelle alle 18 Slot-Gruppen (6 Muster * 3 KWs) -----
+
+            for (const pattern of kindPatterns) {
+                for (const kw of kalenderwochen) {
+                    const payload = {
+                        elternSlotTyp,
+                        Kalenderwoche: kw,
+                        Verkehrstag: verkehrstag,
+                        Abschnitt: pattern.Abschnitt,
+                        alternativen: [pattern]
+                    };
+                    const response = await request(app).post('/api/slots').send(payload);
+                    expect(response.status).toBe(201);
+
+                    const key = `KW${kw}_${pattern.Abfahrt.stunde}${String(pattern.Abfahrt.minute).padStart(2, '0')}`;
+                    erstellteElternSlots[key] = response.body.data;
+                }
+            }
+            expect(Object.keys(erstellteElternSlots).length).toBe(18); // 6 Muster * 3 KWs
+
+            // ----- 3. Erstelle die Anfragen mit der korrekten Eltern-Kind-Struktur -----
+
+            // Finde die spezifischen Slots (Abfahrt 8:00) für die Anfragen in den jeweiligen KWs
+            const elternSlot_KW11 = erstellteElternSlots['KW11_800'];
+            const elternSlot_KW12 = erstellteElternSlots['KW12_800'];
+            const elternSlot_KW13 = erstellteElternSlots['KW13_800'];
+
+            // Bereite die ZugewieseneSlots-Arrays für die verschiedenen Anfragen vor
+            const zugewieseneSlots_3Wochen = [
+                { slot: elternSlot_KW11._id, kind: elternSlot_KW11.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW12._id, kind: elternSlot_KW12.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' },
+                { slot: elternSlot_KW13._id, kind: elternSlot_KW13.gabelAlternativen[0]._id, statusEinzelzuweisung: 'wartet_konflikt_topf' }
+            ];
+            const zugewieseneSlots_2Wochen = zugewieseneSlots_3Wochen.slice(0, 2); // Nur KW 11 & 12
+
+            const anfrageBasis = {
+                Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", 
+                ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}],
+                Status: 'validiert'
             };
 
-            for (let kw = 11; kw <= 13; kw++) {
-                
-                    // Erstelle 6 Slots pro Topf-Definition, um maxKap=4 zu erhalten
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw });
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute:  5 }, Ankunft: { stunde: 8, minute: 50 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 10 }, Ankunft: { stunde: 8, minute: 55 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 15 }, Ankunft: { stunde: 9, minute:  0 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 20 }, Ankunft: { stunde: 9, minute:  5 } });            
-                    await request(app).post('/api/slots').send({ ...commonSlotParams2, Kalenderwoche: kw, Abfahrt: { stunde: 8, minute: 25 }, Ankunft: { stunde: 9, minute: 10 } });            
-                
-            }
+            // Erstelle die vier Anfragen
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "X1", EVU: "Inv1", Email: 'rv@evu1.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, // 3 Wochen
+                ZugewieseneSlots: zugewieseneSlots_3Wochen
+            }).save();
 
-            const s11 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 11});
-            const s12 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 12});
-            const s13 = await Slot.findOne({Abschnitt: 'West', Kalenderwoche: 13});
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Y1", EVU: "Inv2", Email: 'rv@evu2.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen 
+            }).save();
 
-            // 1. Lade die drei Kapazitätstöpfe
-            const kt_11 = await Kapazitaetstopf.findOne({Abschnitt: 'West', Kalenderwoche: 11});
-            const kt_12 = await Kapazitaetstopf.findOne({Abschnitt: 'West', Kalenderwoche: 12});
-            const kt_13 = await Kapazitaetstopf.findOne({Abschnitt: 'West', Kalenderwoche: 13});
-            
-            // 2. Erstelle 4 Anfragen
-            await new Anfrage({ Zugnummer: "X1", EVU: "Inv1", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-30" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu1.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s13._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert' }).save();
-            await new Anfrage({ Zugnummer: "Y1", EVU: "Inv2", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu2.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "Z1", EVU: "Inv3", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu3.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
-            await new Anfrage({ Zugnummer: "V1", EVU: "Inv4", Verkehrsart: "SPFV", Verkehrstag: "Mo-Fr", Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, ListeGewuenschterSlotAbschnitte: [{von:"X", bis:"S", Abfahrtszeit:{stunde:8,minute:0}, Ankunftszeit:{stunde:8,minute:45}}], Email: 'rv@evu4.de',
-            ZugewieseneSlots: [{slot: s11._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}, {slot: s12._id, statusEinzelzuweisung: 'wartet_konflikt_topf'}], Status: 'validiert'  }).save();
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "Z1", EVU: "Inv3", Email: 'rv@evu3.de',
+                Zeitraum: { start: "2025-03-10", ende: "2025-03-23" }, // 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
+            await new Anfrage({ 
+                ...anfrageBasis, Zugnummer: "V1", EVU: "Inv4", Email: 'rv@evu4.de',
+                Zeitraum: { start: "2025-03-11", ende: "2025-03-23" }, // Anderer Starttag, aber 2 Wochen
+                ZugewieseneSlots: zugewieseneSlots_2Wochen
+            }).save();
 
             let anfrage_X = await Anfrage.findOne({Zugnummer: "X1"}); //wird später tlw. abgelehnt wegen Entgelt
             let anfrage_Y = await Anfrage.findOne({Zugnummer: "Y1"}); //geht ins Höchstpreisverfahren
@@ -2620,107 +3101,74 @@ describe('Konfliktgruppen-Status-Synchronisation Topf-Konflikte - Konflikt in de
             }
 
 
-            const slotData3 = {
-            slotTyp: "NACHT", von: "C", bis: "D", Abschnitt: "Strecke3", 
-            Verkehrstag: "täglich", 
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Grundentgelt: 100,
-            Zeitfenster: '03-05',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 90
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            const zeitraum = { 
+                start: '2025-07-07', 
+                ende: '2025-08-03'
             };
+            const gemeinsamerVerkehrstag = 'täglich';
 
-            const slotData4 = {
-            slotTyp: "TAG", von: "D", bis: "E", Abschnitt: "Strecke4",             
-            Verkehrstag: "täglich",       
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Verkehrsart: "SGV",  
-            Grundentgelt: 100
-            };
+            // Wir definieren eine Liste aller 13 einzigartigen Slot-Muster, die wir erstellen wollen.
+            const slotPatternsToCreate = [
+                // 3 Nacht-Slots auf C-D
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '03-05', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '03-05', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '03-05', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                
+                // 5 Tages-Slots auf D-E
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 33 }, Ankunft: { stunde: 7, minute: 19 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 43 }, Ankunft: { stunde: 7, minute: 29 } } },
 
-            const slotData5 = {
-            slotTyp: "TAG", von: "D", bis: "F", Abschnitt: "Strecke5",             
-            Verkehrstag: "täglich",       
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Verkehrsart: "SGV",  
-            Grundentgelt: 100
-            };
+                // 5 Tages-Slots auf D-F
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "F", Abschnitt: "Strecke5", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 7 }, Ankunft: { stunde: 6, minute: 49 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "F", Abschnitt: "Strecke5", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 17 }, Ankunft: { stunde: 6, minute: 59 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "F", Abschnitt: "Strecke5", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 27 }, Ankunft: { stunde: 7, minute: 9 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "F", Abschnitt: "Strecke5", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 37 }, Ankunft: { stunde: 7, minute: 19 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "F", Abschnitt: "Strecke5", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 47 }, Ankunft: { stunde: 7, minute: 29 } } },
+            ];
 
-            //3 Nacht-Slots auf C-D --> Kapazität von 2
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            
-            // 5 Tages-Slots auf D-E --> Kapazität von 3
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 33 }, Ankunft: { stunde: 7, minute: 19 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 43 }, Ankunft: { stunde: 7, minute: 29 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
+            const erstellteElternSlots = [];
 
-            // 5 Tages-Slots auf D-F --< Kapazität von 3
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData5, Abfahrt: { stunde: 5, minute: 7 }, Ankunft: { stunde: 6, minute: 49 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData5, Abfahrt: { stunde: 5, minute: 17 }, Ankunft: { stunde: 6, minute: 59 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData5, Abfahrt: { stunde: 5, minute: 27 }, Ankunft: { stunde: 7, minute: 9 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData5, Abfahrt: { stunde: 5, minute: 37 }, Ankunft: { stunde: 7, minute: 19 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData5, Abfahrt: { stunde: 5, minute: 47 }, Ankunft: { stunde: 7, minute: 29 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
+            // ----- 2. Erstelle alle Slot-Gruppen-Serien in einer Schleife -----
 
-            kt_all = await Kapazitaetstopf.find({});
+            for (const pattern of slotPatternsToCreate) {
+                // Baue den Payload für den Massen-Erstellungs-Endpunkt
+                const payload = {
+                    elternSlotTyp: pattern.elternSlotTyp,
+                    Verkehrstag: gemeinsamerVerkehrstag,
+                    zeitraumStart: zeitraum.start,
+                    zeitraumEnde: zeitraum.ende,
+                    Abschnitt: pattern.alternative.Abschnitt,
+                    alternativen: [
+                        pattern.alternative
+                    ]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                const response = await request(app)
+                    .post('/api/slots/massen-erstellung')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+                expect(response.body.erstellteSlots).toBeDefined();
+                // Jeder Aufruf erzeugt Slots für 4 Wochen * 2 Verkehrstage = 8 Slot-Gruppen
+                // (Annahme: Zeitraum sind 4 Wochen, z.B. KW 28, 29, 30, 31)
+                expect(response.body.erstellteSlots).toHaveLength(8); 
+                erstellteElternSlots.push(...response.body.erstellteSlots);
+            }
+
+            // ----- 3. Finale Überprüfung -----
+            const kt_all = await Kapazitaetstopf.find({});
+            // 4 Wochen * 2 VTs = 8 Kombinationen pro Topf-Muster.
+            // Topf-Muster 1: Strecke3, ALLE, 03-05 -> 8 Töpfe
+            // Topf-Muster 2: Strecke4, SGV, 05-07 -> 8 Töpfe
+            // Topf-Muster 3: Strecke5, SGV, 05-07 -> 8 Töpfe
+            // Da Muster 2 und 3 im selben Zeitfenster liegen (05-07), aber unterschiedliche Abschnitte haben,
+            // ergeben sie unterschiedliche Töpfe. Total = 8 + 8 + 8 = 24 Töpfe.
             expect(kt_all.length).toBe(24);
         });
 
@@ -3145,71 +3593,61 @@ describe('Konfliktgruppen-Status-Synchronisation (Slot-Konflikte) bei Nacht-Slot
                 await collection.deleteMany({});
             }
 
-            const slotData3 = {
-            slotTyp: "NACHT", von: "C", bis: "D", Abschnitt: "Strecke3", 
-            Verkehrstag: "täglich", 
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Grundentgelt: 100,
-            Zeitfenster: '03-05',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 90
+            // ----- 1. Vorbereitung: Definiere die zu erstellenden Slot-Muster -----
+
+            const zeitraum = { 
+                start: '2025-07-07', 
+                ende: '2025-08-03'
             };
+            const gemeinsamerVerkehrstag = 'täglich';
 
-            const slotData4 = {
-            slotTyp: "TAG", von: "D", bis: "E", Abschnitt: "Strecke4",             
-            Verkehrstag: "täglich",       
-            zeitraumStart: '2025-07-07',  
-            zeitraumEnde: '2025-08-03',  
-            Verkehrsart: "SGV",  
-            Grundentgelt: 100
-            };
+            // Wir definieren eine Liste aller 8 einzigartigen Slot-Muster, die wir als Serie erstellen wollen.
+            const slotPatternsToCreate = [
+                // 3 identische Nacht-Slots auf C-D (erzeugen 3 Eltern-Slots im selben Topf-Muster)
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '03-05', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '03-05', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                { elternSlotTyp: "NACHT", alternative: { von: "C", bis: "D", Abschnitt: "Strecke3", Grundentgelt: 100, Zeitfenster: '03-05', Mindestfahrzeit: 60, Maximalfahrzeit: 90, Verkehrsart: 'ALLE' } },
+                
+                // 5 unterschiedliche Tages-Slots auf D-E
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 33 }, Ankunft: { stunde: 7, minute: 19 } } },
+                { elternSlotTyp: "TAG", alternative: { von: "D", bis: "E", Abschnitt: "Strecke4", Verkehrsart: "SGV", Grundentgelt: 100, Abfahrt: { stunde: 5, minute: 43 }, Ankunft: { stunde: 7, minute: 29 } } },
+                ];
 
-             //3 Nacht-Slots auf C-D --> Kapazität von 2
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send(slotData3);
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            
-            // 5 Tages-Slots auf D-E --> Kapazität von 3
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 3 }, Ankunft: { stunde: 6, minute: 49 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 13 }, Ankunft: { stunde: 6, minute: 59 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 23 }, Ankunft: { stunde: 7, minute: 9 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 33 }, Ankunft: { stunde: 7, minute: 19 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
-            response = await request(app)
-                .post('/api/slots/massen-erstellung')
-                .send({...slotData4, Abfahrt: { stunde: 5, minute: 43 }, Ankunft: { stunde: 7, minute: 29 },});
-            expect(response.status).toBe(201);
-            expect(response.body.erstellteSlots).toBeDefined();
+            let response;
 
-            kt_all = await Kapazitaetstopf.find({});
+            // ----- 2. Erstelle alle Slot-Gruppen-Serien in einer Schleife -----
+
+            for (const pattern of slotPatternsToCreate) {
+                // Baue den Payload für den Massen-Erstellungs-Endpunkt
+                const payload = {
+                    elternSlotTyp: pattern.elternSlotTyp,
+                    Verkehrstag: gemeinsamerVerkehrstag,
+                    zeitraumStart: zeitraum.start,
+                    zeitraumEnde: zeitraum.ende,
+                    Abschnitt: pattern.alternative.Abschnitt,
+                    alternativen: [
+                        pattern.alternative
+                    ]
+                };
+
+                // Sende den Payload an den API-Endpunkt
+                response = await request(app)
+                    .post('/api/slots/massen-erstellung')
+                    .send(payload);
+
+                expect(response.status).toBe(201);
+                expect(response.body.erstellteSlots).toBeDefined();
+            }
+
+            // ----- 3. Finale Überprüfung -----
+            const kt_all = await Kapazitaetstopf.find({});
+            // 4 Wochen * 2 VTs = 8 Kombinationen pro Topf-Muster.
+            // Topf-Muster 1: Strecke3, ALLE, 03-05 -> 8 Töpfe
+            // Topf-Muster 2: Strecke4, SGV, 05-07 -> 8 Töpfe
+            // Total = 24 Töpfe
             expect(kt_all.length).toBe(16);
         });
         it('sollte den Status der Gruppe und der Anfragen auch bei mehrmaliger Konfliktanalyse der Slot-Konflikte in der Nacht korrekt beibehalten', async () => {

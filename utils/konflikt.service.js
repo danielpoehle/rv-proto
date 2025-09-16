@@ -57,7 +57,16 @@ async function aktualisiereKonfliktGruppen() {
         const relevanteKonflikte = await KonfliktDokumentation.find({})
             .select('beteiligteAnfragen status ausloesenderKapazitaetstopf ausloesenderSlot konfliktTyp')
             .populate('ausloesenderKapazitaetstopf', 'maxKapazitaet ListeDerSlots') // Lade Infos des Topfs für gruppenschluessel
-            .populate('ausloesenderSlot', 'Linienbezeichnung von bis Abfahrt Verkehrsart')
+            .populate({ 
+                path: 'ausloesenderSlot', // Populiere den ELTERN-Slot
+                model: 'Slot',
+                select: 'Linienbezeichnung gabelAlternativen', // Wir brauchen die Liste der Kinder
+                populate: { // INNERHALB des Eltern-Slots, populiere jetzt die Kinder
+                    path: 'gabelAlternativen',
+                    model: 'Slot',
+                    select: 'von bis Abfahrt Ankunft Verkehrsart Zeitfenster' // Lade die Details vom KIND
+                }
+            })
             .lean(); // Lade Infos des Slots für gruppenschluessel
 
 
@@ -77,9 +86,11 @@ async function aktualisiereKonfliktGruppen() {
                 gruppenSchluessel = `${maxKap}#${evuMarktanteilLimit}|${anfrageIdsStrings.join('#')}`;  
             }
             if(konflikt.konfliktTyp === 'SLOT'){
-                //console.log(konflikt.ausloesenderSlot);
-                //console.log(konflikt.ausloesenderSlot.Abfahrt);
-                const prefix = `${konflikt.ausloesenderSlot.Linienbezeichnung}#${konflikt.ausloesenderSlot.von}#${konflikt.ausloesenderSlot.bis}#${formatTimeForID(konflikt.ausloesenderSlot.Abfahrt.stunde, konflikt.ausloesenderSlot.Abfahrt.minute)}#${konflikt.ausloesenderSlot.Verkehrsart}`;
+                const elternSlot = konflikt.ausloesenderSlot;
+                // Nimm das erste Kind als Repräsentant für die ID-Generierung
+                const repraesentativesKind = elternSlot?.gabelAlternativen?.[0];
+                
+                const prefix = `${elternSlot.Linienbezeichnung}#${repraesentativesKind.von}#${repraesentativesKind.bis}#${formatTimeForID(repraesentativesKind.Abfahrt.stunde, repraesentativesKind.Abfahrt.minute)}#${repraesentativesKind.Verkehrsart}`;
                 // Schlüssel: "Linie#von#bis#Abfahrt(HHMM)#Verkehrsart|anfrageId1#anfrageId2#..."
                 gruppenSchluessel = `${prefix}|${anfrageIdsStrings.join('#')}`;
             }

@@ -1,6 +1,6 @@
 // slot-buchungs-app/controllers/slotController.js
 const mongoose = require('mongoose');
-const {Slot} = require('../models/Slot');
+const { Slot, TagesSlot, NachtSlot } = require('../models/Slot');
 const Kapazitaetstopf = require('../models/Kapazitaetstopf');
 const { parseISO } = require('date-fns');
 const { GLOBAL_KW1_START_DATE, getGlobalRelativeKW } = require('../utils/date.helpers');
@@ -12,72 +12,62 @@ const { findOrCreateKapazitaetstopf, updateTopfSlotsAndCapacity } = require('../
 
 // @desc    Erstellt einen neuen Infrastruktur-Slot
 // @route   POST /api/slots
-exports.createSlot = async (req, res) => {    
-        const { 
-            slotTyp, // NEU: 'TAG' oder 'NACHT'
-            von, bis, Abschnitt, Verkehrstag, Grundentgelt, Linienbezeichnung,
-            Kalenderwoche,
-            // Tag-spezifisch:
-            Abfahrt, Ankunft, Verkehrsart,
-            // Nacht-spezifisch:
-            Zeitfenster, Mindestfahrzeit, Maximalfahrzeit
-        } = req.body;
-
-        //console.log(req.body);
-
-        //0. Validierung ob slotTyp gesetzt wurde
-        if(!slotTyp){
-            return res.status(400).json({ message: 'Bitte slotTyp setzen.' });
+exports.createSlot = async (req, res) => {  
+    // req.body = {
+    //      "elternSlotTyp": "TAG",
+    //      "Linienbezeichnung": "S1",
+    //      "Verkehrstag": "Mo-Fr",
+    //      "Kalenderwoche": 5,
+    //      "alternativen": [
+    //           {
+    //              "von": "A",
+    //              "bis": "B",
+    //              "Abschnitt": "S1-AB",
+    //              "Grundentgelt": 10,
+    //              "Abfahrt": { "stunde": 8, "minute": 0 },
+    //              "Ankunft": { "stunde": 8, "minute": 10 },
+    //              "Verkehrsart": "SPNV"
+    //            },
+    //            {
+    //              "von": "A",
+    //              "bis": "C",
+    //              "Abschnitt": "S1-AC",
+    //              "Grundentgelt": 12,
+    //              "Abfahrt": { "stunde": 8, "minute": 0 },
+    //              "Ankunft": { "stunde": 8, "minute": 12 },
+    //              "Verkehrsart": "SPNV"
+    //            }
+    //      ]
+    // } 
+    // Der Request-Body entspricht jetzt der neuen Struktur
+    const gruppenData = req.body;
+    try {       
+        //console.log(gruppenData);
+        
+        // Validierung könnte hier stattfinden
+        if (!gruppenData.elternSlotTyp || !gruppenData.alternativen) {
+            return res.status(400).json({ message: 'Payload muss elternSlotTyp und ein Array für die KIND-Slots enthalten.' });
         }
 
-        // 1. Validierung der Eingabedaten
-        if(slotTyp === 'TAG'){
-            if (!von || !bis || !Abschnitt || !Abfahrt || !Ankunft || !Verkehrstag || !Grundentgelt || !Verkehrsart || !Kalenderwoche ) {                
-                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Tag) ausfüllen.' });
-            }
-        }else{ // Nacht-Slot
-            if (!von || !bis || !Abschnitt || !Zeitfenster || !Mindestfahrzeit || !Verkehrstag || !Grundentgelt || !Maximalfahrzeit || !Kalenderwoche ) {
-                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Nacht) ausfüllen.' });
-            }
-        }        
-
-        if(!['Mo-Fr', 'Sa+So'].includes(Verkehrstag)){
-            return res.status(400).json({ message: 'Verkehrstag Mo-Fr oder Sa+So ist nur zulässig' });
-        }
-
-        const slotData = {
-                    slotTyp, von, bis, Abschnitt, Grundentgelt, 
-                    Linienbezeichnung: Linienbezeichnung || undefined,
-                    Kalenderwoche,
-                    Verkehrstag,
-                    // Füge typspezifische Daten hinzu
-                    ...(slotTyp === 'NACHT'
-                        ? { Zeitfenster, Mindestfahrzeit, Maximalfahrzeit }
-                        : { Abfahrt, Ankunft, Verkehrsart }
-                    )
-                };
-
-        try {
-            // Rufe die zentrale Service-Funktion auf
-            const erstellterSlot = await slotService.createSingleSlot(slotData);   
-            res.status(201).json({
-            message: 'Slot erfolgreich erstellt und Kapazitätstopf-Verknüpfung hergestellt/geprüft.',
-            data: erstellterSlot
-        });                        
-
-        } catch (err) {
-            console.error(`Fehler beim Erstellen von ${slotTyp}-Slot für KW ${Kalenderwoche} / VT ${Verkehrstag}:`, err);
+        const erstellteGruppe = await slotService.createSlotGruppe(gruppenData);
+        
+        res.status(201).json({
+            message: `Erstellen von ${gruppenData.elternSlotTyp}-Slot für KW ${gruppenData.Kalenderwoche} / VT ${gruppenData.Verkehrstag} erfolgreich erstellt und Kapazitätstopf-Verknüpfung hergestellt/geprüft.`,
+            data: erstellteGruppe
+        });
+    } catch (err) {
+            console.error(`Fehler beim Erstellen von ${gruppenData.elternSlotTyp}-Slot für KW ${gruppenData.Kalenderwoche} / VT ${gruppenData.Verkehrstag}:`, err);
             // Prüfe auf spezifische Fehler, z.B. wenn der Slot schon existiert (unique-Verletzung)
             if (err.code === 11000) {
                 return res.status(409).json({ // 409 Conflict
-                    message: 'Ein Slot mit dieser sprechenden ID existiert bereits.',
+                    message: `Fehler beim Erstellen von ${gruppenData.elternSlotTyp}-Slot für KW ${gruppenData.Kalenderwoche} / VT ${gruppenData.Verkehrstag}: Ein Slot mit dieser sprechenden ID existiert bereits.`,
                     errorDetails: err.message
                 });
             }
             
             // Allgemeiner Serverfehler
             res.status(500).json({
-                message: 'Ein interner Fehler ist beim Erstellen des Slots aufgetreten.',
+                message: `Fehler beim Erstellen von ${gruppenData.elternSlotTyp}-Slot für KW ${gruppenData.Kalenderwoche} / VT ${gruppenData.Verkehrstag}: Interner Serverfehler.`,
                 errorDetails: err.message
             });                            
         }    
@@ -89,7 +79,8 @@ exports.createSlot = async (req, res) => {
 exports.getAllSlots = async (req, res) => {
     try {
         const queryParams = req.query;
-        let filter = {};
+        let filter = { slotStrukturTyp: 'KIND' };
+        //let filter = {  };
         let sortOptions = {};
 
         // Filter-Logik (Beispiele)
@@ -144,21 +135,47 @@ exports.getSlotById = async (req, res) => {
     try {
         const slotIdParam = req.params.slotId;
         let queryConditions = [];
-
-        // Suche nach SlotID_Sprechend oder der technischen _id
-        queryConditions.push({ SlotID_Sprechend: slotIdParam });
         if (mongoose.Types.ObjectId.isValid(slotIdParam)) {
             queryConditions.push({ _id: slotIdParam });
         }
+        if (slotIdParam) { // Füge Suche nach sprechender ID hinzu
+            queryConditions.push({ SlotID_Sprechend: slotIdParam });
+        }
 
-        const slot = await Slot.findOne({ $or: queryConditions })
-            .populate('VerweisAufTopf', 'TopfID maxKapazitaet') // Lade den zugehörigen Topf und wähle nur das Feld 'TopfID' aus
-            .populate('zugewieseneAnfragen', 'AnfrageID_Sprechend Status'); // Lade die Anfragen und wähle nur die 'AnfrageID_Sprechend'
+        if (queryConditions.length === 0) {
+             return res.status(400).json({ message: 'Gültige Slot-ID erforderlich.' });
+        }
 
+        // Schritt 1: Finde den Slot, aber populiere noch nichts.
+        const slot = await Slot.findOne({ $or: queryConditions });
 
         if (!slot) {
             return res.status(404).json({ message: 'Slot nicht gefunden.' });
         }
+
+        console.log(slot);
+
+        // Schritt 2: Führe die korrekte Population basierend auf dem Typ durch.
+        if (slot.slotStrukturTyp === 'KIND') {
+            // Für einen KIND-Slot: Populiere den Eltern-Slot, und darin den Verweis auf den Topf.
+            await slot.populate({
+                path: 'gabelElternSlot',
+                select: 'VerweisAufTopf SlotID_Sprechend',
+                populate: {
+                    path: 'VerweisAufTopf',
+                    model: 'Kapazitaetstopf',
+                    select: 'TopfID maxKapazitaet'
+                }
+            });
+        } else { // Es ist ein ELTERN-Slot
+            // Für einen ELTERN-Slot: Populiere direkt seinen eigenen Verweis auf den Topf.
+            await slot.populate('VerweisAufTopf', 'TopfID maxKapazitaet');
+        }
+
+        // Schritt 3: Populiere die zugewiesenen Anfragen (dies ist für beide Typen gleich).
+        await slot.populate('zugewieseneAnfragen', 'AnfrageID_Sprechend Status');
+
+        console.log(slot);
 
         res.status(200).json({
             message: 'Slot erfolgreich abgerufen.',
@@ -231,84 +248,103 @@ exports.getKonfliktAlternativenSlots = async (req, res) => {
     }
 };
 
-// @desc    Aktualisiert einen bestehenden Slot
+// @desc    Aktualisiert einen einzelnen, fahrbaren KIND-Slot
 // @route   PUT /api/slots/:slotId
 exports.updateSlot = async (req, res) => {
     try {
-        const slotIdParam = req.params.slotId;
-        // ... (Slot finden - Logik bleibt) ...
-        let queryConditions = [{ SlotID_Sprechend: slotIdParam }];
-        if (mongoose.Types.ObjectId.isValid(slotIdParam)) {
-            queryConditions.push({ _id: slotIdParam });
+        const slotIdParam = req.params.slotId; // Dies ist die ID des KIND-Slots
+        const updates = req.body || {};
+
+        // 1. Finde den zu aktualisierenden KIND-Slot
+        const kindSlot = await Slot.findById(slotIdParam);
+
+        if (!kindSlot || kindSlot.slotStrukturTyp !== 'KIND') {
+            return res.status(404).json({ message: 'Fahrbarer Slot (Kind-Slot) nicht gefunden.' });
         }
-        let slot = await Slot.findOne({ $or: queryConditions });
-        if (!slot) { return res.status(404).json({ message: 'Slot nicht gefunden.' }); }
+        
+        // Lade das zugehörige Eltern-Dokument
+        const elternSlot = await Slot.findById(kindSlot.gabelElternSlot);
+        if (!elternSlot) {
+            return res.status(500).json({ message: `Inkonsistente Daten: Kind-Slot ${kindSlot._id} hat keinen gültigen Eltern-Slot.`});
+        }
 
+        // Erlaube das Update nur, wenn der Eltern-Slot genau ein Kind hat (also kein echter Gabel-Slot ist).
+        if (elternSlot.gabelAlternativen.length !== 1) {
+            return res.status(409).json({ // 409 Conflict
+                message: 'Update nicht möglich: Dieser Slot ist Teil einer Gabelung mit mehreren Alternativen. Um Gabel-Slots zu ändern, müssen sie gelöscht und als neue Gruppe angelegt werden.'
+            });
+        }
+        
+        const alterVerweisAufTopf = elternSlot.VerweisAufTopf ? elternSlot.VerweisAufTopf : null;
 
-        const alterVerweisAufTopf = slot.VerweisAufTopf ? slot.VerweisAufTopf : null;
-
-        // Update Slot properties
-        const allowedUpdates = ['von', 'bis', 'Abschnitt', 'Abfahrt', 'Ankunft', 'Verkehrstag', 'Kalenderwoche', 'Verkehrsart', 'Grundentgelt', 'Linienbezeichnung'];
-        // ... (Updates anwenden - Logik bleibt) ...
-         const updates = req.body;
+        // 2. Wende die Updates auf das KIND-Dokument an
+        const allowedUpdates = ['von', 'bis', 'Abschnitt','Abfahrt', 'Ankunft', 'Verkehrsart', 'Grundentgelt', 'Linienbezeichnung', 'Zeitfenster', 'Mindestfahrzeit', 'Maximalfahrzeit'];
         let relevanteFelderGeaendert = false;
+        
         for (const key in updates) {
             if (allowedUpdates.includes(key)) {
-                if ((key === 'Abfahrt' || key === 'Ankunft') && typeof updates[key] === 'object') {
-                    slot[key] = { ...slot[key], ...updates[key] };
-                } else {
-                    slot[key] = updates[key];
-                }
-                slot.markModified(key);
-                if (['Abschnitt', 'Kalenderwoche', 'Verkehrstag', 'Verkehrsart', 'Abfahrt', 'Grundentgelt'].includes(key)) {
+                // ... (deine Logik zum Zuweisen der Updates zum `kindSlot`-Objekt)
+                kindSlot[key] = updates[key];
+                kindSlot.markModified(key);
+                if (['Abschnitt', 'Kalenderwoche', 'Verkehrstag', 'Verkehrsart', 'Abfahrt', 'Zeitfenster'].includes(key)) {
                     relevanteFelderGeaendert = true;
                 }
             }
         }
-        // ... (Ankunftszeit > Abfahrtszeit Validierung) ...
+        // Aktualisiere auch die gemeinsamen Felder am Eltern-Teil, falls sie sich ändern
+        if (updates.Linienbezeichnung !== undefined) elternSlot.Linienbezeichnung = updates.Linienbezeichnung;
+        if (updates.Abschnitt !== undefined) {elternSlot.Abschnitt = updates.Abschnitt; relevanteFelderGeaendert = true;}
+        if (updates.Kalenderwoche !== undefined) {elternSlot.Kalenderwoche = updates.Kalenderwoche; relevanteFelderGeaendert = true;}
+        if (updates.Verkehrstag !== undefined) {elternSlot.Verkehrstag = updates.Verkehrstag; relevanteFelderGeaendert = true;}        
 
-
-        // Wenn sich für Topf-Zuordnung relevante Felder geändert haben, neuen Topf bestimmen
-        let neuerVerweisAufTopf = alterVerweisAufTopf; // Initial annehmen, dass es gleich bleibt
+        // 3. Wenn sich für die Topf-Zuordnung relevante Felder geändert haben, neuen Topf für ELTERN bestimmen
         if (relevanteFelderGeaendert) {
-            const potenziellerNeuerTopf = await findOrCreateKapazitaetstopf({
-                slotTyp: slot.slotTyp,
-                Abschnitt: slot.Abschnitt,
-                Kalenderwoche: slot.Kalenderwoche,
-                Verkehrstag: slot.Verkehrstag,
-                Verkehrsart: slot.Verkehrsart,
-                Abfahrt: slot.Abfahrt
-            });
-            neuerVerweisAufTopf = potenziellerNeuerTopf ? potenziellerNeuerTopf._id : null;
-            slot.VerweisAufTopf = neuerVerweisAufTopf;
+            const topfSuchDaten = {
+                Abschnitt: elternSlot.Abschnitt,
+                Kalenderwoche: elternSlot.Kalenderwoche,
+                Verkehrstag: elternSlot.Verkehrstag,
+                // Typspezifische Daten vom Kind übernehmen
+                slotTyp: kindSlot.slotTyp,
+                Verkehrsart: kindSlot.Verkehrsart,
+                Abfahrt: kindSlot.Abfahrt,
+                Zeitfenster: kindSlot.Zeitfenster
+            };
+
+            const potenziellerNeuerTopf = await findOrCreateKapazitaetstopf(topfSuchDaten); // Nutze die Daten des kombinierten Objekts zur Findung
+            
+            // Aktualisiere den Verweis im ELTERN-Dokument
+            elternSlot.VerweisAufTopf = potenziellerNeuerTopf ? potenziellerNeuerTopf._id : null;
         }
 
-        const aktualisierterSlot = await slot.save(); // pre-save Hook für SlotID_Sprechend läuft
+        // 4. Speichere beide Dokumente (Kind und Eltern)
+        // Die pre-save Hooks laufen und generieren ggf. neue sprechende IDs
+        const aktualisierterKindSlot = await kindSlot.save();
+        await elternSlot.save();
 
-        // Bidirektionale Verknüpfung managen, wenn sich der Verweis geändert hat
-        const finalerNeuerVerweis = aktualisierterSlot.VerweisAufTopf ? aktualisierterSlot.VerweisAufTopf : null;
+        // 5. Bidirektionale Verknüpfung in den Töpfen managen
+        const neuerVerweisAufTopf = elternSlot.VerweisAufTopf ? elternSlot.VerweisAufTopf : null;
+        
+        // Prüfen, ob sich der Topf-Verweis des ELTERN-Slots geändert hat
+        const hatTopfSichGeaendert = alterVerweisAufTopf?.toString() !== neuerVerweisAufTopf?.toString();
 
-        if ((alterVerweisAufTopf && !finalerNeuerVerweis) || 
-            (!alterVerweisAufTopf && finalerNeuerVerweis) ||
-            (alterVerweisAufTopf && finalerNeuerVerweis && !alterVerweisAufTopf.equals(finalerNeuerVerweis))) {
-            
+        if (hatTopfSichGeaendert) {
+            // Entferne den ELTERN-Slot aus dem alten Topf
             if (alterVerweisAufTopf) {
-                await updateTopfSlotsAndCapacity(alterVerweisAufTopf, aktualisierterSlot._id, 'remove');
+                await updateTopfSlotsAndCapacity(alterVerweisAufTopf, elternSlot._id, 'remove');
             }
-            if (finalerNeuerVerweis) {
-                await updateTopfSlotsAndCapacity(finalerNeuerVerweis, aktualisierterSlot._id, 'add');
+            // Füge den ELTERN-Slot zum neuen Topf hinzu
+            if (neuerVerweisAufTopf) {
+                await updateTopfSlotsAndCapacity(neuerVerweisAufTopf, elternSlot._id, 'add');
             }
         }
 
         res.status(200).json({
-            message: 'Slot erfolgreich aktualisiert, Kapazitätstopf-Verknüpfung geprüft/hergestellt.',
-            data: aktualisierterSlot
+            message: 'Slot erfolgreich aktualisiert, Kapazitätstopf-Verknüpfung geprüft.',
+            data: aktualisierterKindSlot
         });
 
     } catch (error) {
-        // ... (Fehlerbehandlung für Slot-Update) ...
         console.error('Fehler beim Aktualisieren des Slots:', error);
-        // ...
         res.status(500).json({ message: 'Serverfehler beim Aktualisieren des Slots.' });
     }
 };
@@ -319,42 +355,67 @@ exports.deleteSlot = async (req, res) => {
     try {
         const slotIdParam = req.params.slotId;
 
-        let queryConditions = [{ SlotID_Sprechend: slotIdParam }];
-        if (mongoose.Types.ObjectId.isValid(slotIdParam)) {
-            queryConditions.push({ _id: slotIdParam });
-        }
-        const slot = await Slot.findOne({ $or: queryConditions });
+        // 1. Finde den initialen Slot, der übergeben wurde zum Löschen
+        const initialSlot = await Slot.findOne({ 
+            $or: [{ _id: mongoose.Types.ObjectId.isValid(slotIdParam) ? slotIdParam : null }, { SlotID_Sprechend: slotIdParam }]
+        });
 
-        if (!slot) {
-            return res.status(404).json({ message: 'Slot nicht gefunden.' });
+        if (!initialSlot) {
+            return res.status(404).json({ message: `Slot mit der ID ${slotIdParam} nicht gefunden.` });
         }
 
-        // Sicherheitsprüfung: Slot nicht löschen, wenn ihm Anfragen zugewiesen sind
-        if (slot.zugewieseneAnfragen && slot.zugewieseneAnfragen.length > 0) {
+        // 2. Finde die gesamte zu löschende "Familie" (Eltern + alle Kinder)
+        let elternSlot;
+        if (initialSlot.slotStrukturTyp === 'KIND') {
+            elternSlot = await Slot.findById(initialSlot.gabelElternSlot);
+        } else { // Es ist bereits der Eltern-Slot
+            elternSlot = initialSlot;
+        }
+
+        if (!elternSlot) {
+            // Dies ist ein inkonsistenter Zustand, wir löschen sicherheitshalber nur das gefundene Kind
+            await initialSlot.deleteOne();
+            return res.status(200).json({ message: 'Kind-Slot ohne Elternteil gelöscht. Daten waren inkonsistent.' });
+        }
+        
+        // Sammle die IDs von Eltern und allen Kindern
+        const slotIdsToDelete = [elternSlot._id, ...elternSlot.gabelAlternativen];
+
+
+        // 3. Sicherheitsprüfung: Prüfe, ob IRGENDEIN Slot der Familie noch belegt ist
+        const belegteSlots = await Slot.find({
+            _id: { $in: slotIdsToDelete },
+            'zugewieseneAnfragen.0': { $exists: true } // Effiziente Prüfung, ob Array nicht leer ist
+        }).limit(1);
+
+        if (belegteSlots.length > 0) {
             return res.status(409).json({ // 409 Conflict
-                message: 'Slot kann nicht gelöscht werden, da ihm bereits Anfragen zugewiesen sind.',
-                details: `Dem Slot sind ${slot.zugewieseneAnfragen.length} Anfrage(n) zugewiesen.`
+                message: 'Slot-Familie kann nicht gelöscht werden, da mindestens ein Slot noch von Anfragen belegt ist.',
             });
         }
 
-        // 2. Aufräumen: Entferne die Slots aus den Kapazitätstöpfen
-        // WICHTIG: .deleteMany() löst KEINE Mongoose-Hooks aus! Wir müssen die Logik aus dem
-        // pre('deleteOne')-Hook hier manuell ausführen.
-        const toepfeToUpdate = await Kapazitaetstopf.find({ ListeDerSlots: { $in: [slot._id] } });
-        for (const topf of toepfeToUpdate) {
-            topf.ListeDerSlots.pull(slot._id);
-            topf.maxKapazitaet = Math.floor(0.7 * topf.ListeDerSlots.length);
-            await topf.save();
+        // 4. Aufräumen: Entferne den ELTERN-Slot aus dem Kapazitätstopf
+        if (elternSlot.VerweisAufTopf) {
+            const topf = await Kapazitaetstopf.findById(elternSlot.VerweisAufTopf);
+            if (topf) {
+                topf.ListeDerSlots.pull(elternSlot._id);
+                topf.maxKapazitaet = Math.floor(0.7 * topf.ListeDerSlots.length);
+                await topf.save();
+                console.log(`Eltern-Slot ${elternSlot._id} aus Kapazitätstopf ${topf._id} entfernt.`);
+            }
         }
 
-        // Wenn keine zugewiesenen Anfragen, dann Slot löschen
-        // Die Methode .deleteOne() ist für das Dokument-Objekt selbst
-        await slot.deleteOne();
-        // Alternativ: await Slot.findByIdAndDelete(slot._id); wenn man nur die ID hätte
+        // 5. Führe die Massenlöschung für die gesamte Familie durch
+        const deleteResult = await Slot.deleteMany({ _id: { $in: slotIdsToDelete } });
 
-        res.status(200).json({ // Oder 204 No Content, wenn keine Daten zurückgesendet werden sollen
-            message: 'Slot erfolgreich gelöscht.',
-            data: { id: slot._id, slotIdSprechend: slot.SlotID_Sprechend } // Bestätigungsinformationen
+
+        res.status(200).json({
+            message: `Slot-Familie erfolgreich gelöscht. ${deleteResult.deletedCount} Dokumente wurden entfernt.`,
+            data: { 
+                geloeschteElternId: elternSlot._id,
+                geloeschteKinderIds: elternSlot.gabelAlternativen,
+                anzahlGeloescht: deleteResult.deletedCount
+            }
         });
 
     } catch (error) {
@@ -370,31 +431,10 @@ exports.deleteSlot = async (req, res) => {
 // @route   POST /api/slots/massen-erstellung
 exports.createSlotsBulk = async (req, res) => {
     try {
-        const { 
-            slotTyp, // NEU: 'TAG' oder 'NACHT'
-            von, bis, Abschnitt, Verkehrstag, Grundentgelt, Linienbezeichnung,
-            zeitraumStart, zeitraumEnde,
-            // Tag-spezifisch:
-            Abfahrt, Ankunft, Verkehrsart,
-            // Nacht-spezifisch:
-            Zeitfenster, Mindestfahrzeit, Maximalfahrzeit
-        } = req.body;
-
-        if(!slotTyp){
-            return res.status(400).json({ message: 'Slot-Typ fehlt.' });
-        }
-
-        // 1. Validierung der Eingabedaten
-        if(slotTyp === 'TAG'){
-            if (!von || !bis || !Abschnitt || !Abfahrt || !Ankunft || !Verkehrstag || !Grundentgelt || !Verkehrsart || !zeitraumStart || !zeitraumEnde) {
-                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Tag) ausfüllen.' });
-            }
-        }else{ // Nacht-Slot
-            if (!von || !bis || !Abschnitt || !Zeitfenster || !Mindestfahrzeit || !Verkehrstag || !Grundentgelt || !Maximalfahrzeit || !zeitraumStart || !zeitraumEnde) {
-                return res.status(400).json({ message: 'Bitte alle erforderlichen Felder für die Massenerstellung (Nacht) ausfüllen.' });
-            }
-        }
         
+        const { zeitraumStart, zeitraumEnde, ...musterDaten } = req.body;
+        // musterDaten enthält jetzt elternSlotTyp, Linienbezeichnung, Verkehrstag und das `alternativen`-Array
+
 
         const startDate = parseISO(zeitraumStart);
         const endDate = parseISO(zeitraumEnde);
@@ -412,11 +452,11 @@ exports.createSlotsBulk = async (req, res) => {
 
         // Bestimme, welche Verkehrstag-Typen erstellt werden müssen
         let verkehrstageToCreate = [];
-        if (Verkehrstag === 'täglich') {
+        if (musterDaten.Verkehrstag === 'täglich') {
             verkehrstageToCreate = ['Mo-Fr', 'Sa+So'];
         } else {
             // Akzeptiert 'Mo-Fr' oder 'Sa+So' direkt
-            verkehrstageToCreate = [Verkehrstag];
+            verkehrstageToCreate = [musterDaten.Verkehrstag];
         }
         
         const erstellteSlots = [];
@@ -425,41 +465,36 @@ exports.createSlotsBulk = async (req, res) => {
         // 3. Schleife durch alle KWs und Erstellung der Slots
         for (let kw = startKW; kw <= endKW; kw++) {
             for (const vt of verkehrstageToCreate) {
-                const slotData = {
-                    slotTyp, von, bis, Abschnitt, Grundentgelt, 
-                    Linienbezeichnung: Linienbezeichnung || undefined,
+
+                const gruppenDataFuerIteration = {
+                    ...musterDaten,
                     Kalenderwoche: kw,
-                    Verkehrstag: vt,
-                    // Füge typspezifische Daten hinzu
-                    ...(slotTyp === 'NACHT'
-                        ? { Zeitfenster, Mindestfahrzeit, Maximalfahrzeit }
-                        : { Abfahrt, Ankunft, Verkehrsart }
-                    )
-                };                
+                    Verkehrstag: vt
+                };         
                 
                 try {
                     // Rufe die zentrale Service-Funktion auf
-                    const erstellterSlot = await slotService.createSingleSlot(slotData);
+                    const erstellterSlot = await slotService.createSlotGruppe(gruppenDataFuerIteration);
                     erstellteSlots.push(erstellterSlot);
 
                 } catch (err) {
-                    console.error(`Fehler beim Erstellen von ${slotTyp}-Slot für KW ${kw} / VT ${vt}:`, err);
+                    console.error(`Fehler beim Erstellen von ${musterDaten.elternSlotTyp}-Slot für KW ${kw} / VT ${vt}:`, err);
                     // Wenn ein Slot wegen einer unique-Verletzung (existiert schon) fehlschlägt,
                     // loggen wir den Fehler und machen mit dem nächsten weiter.
-                    fehler.push(`${slotTyp}-Slot KW ${kw} VT ${vt}: ${err.message}`);
+                    fehler.push(`${musterDaten.elternSlotTyp}-Slot KW ${kw} VT ${vt}: ${err.message}`);
                 }
             }
         }
 
         res.status(201).json({
-            message: `Massen-Erstellung abgeschlossen. ${erstellteSlots.length} ${slotTyp}-Slots erfolgreich erstellt. ${fehler.length} Fehler aufgetreten.`,
+            message: `Massen-Erstellung abgeschlossen. ${erstellteSlots.length} ${musterDaten.elternSlotTyp}-Slots erfolgreich erstellt. ${fehler.length} Fehler aufgetreten.`,
             erstellteSlots,
             fehler
         });
 
     } catch (error) {
-        console.error('Schwerwiegender Fehler bei der Massenerstellung von Slots:', error);
-        res.status(500).json({ message: 'Serverfehler bei der Massenerstellung.' });
+        console.error(`Fehler bei der Massenerstellung von ${musterDaten.elternSlotTyp}-Slots: `, error);
+        res.status(500).json({ message: `Fehler bei der Massenerstellung von ${musterDaten.elternSlotTyp}-Slots: ${error}` });
     }
 };
 
@@ -471,7 +506,8 @@ exports.getSlotSummary = async (req, res) => {
             // Stufe 1: Berücksichtige nur Slots, die eine Linienbezeichnung haben.
             {
                 $match: {
-                    Linienbezeichnung: { $exists: true, $ne: null }
+                    slotStrukturTyp: 'KIND', 
+                    Linienbezeichnung: { $exists: true, $ne: null, $ne: '' }
                 }
             },
             // Stufe 2: Füge ein temporäres Feld für den Belegungsstatus hinzu.
@@ -549,6 +585,13 @@ exports.getSlotSummary = async (req, res) => {
 exports.getSlotCounterSummary = async (req, res) => {
     try {
         const summary = await Slot.aggregate([
+            
+            // Stufe 0: Filtere zuerst nur die KIND-Slots heraus.
+            {
+                $match: {
+                    slotStrukturTyp: 'KIND'
+                }
+            },
             // Stufe 1: Gruppiere nach den definierenden Eigenschaften eines Slot-Musters
             {
                 $group: {
@@ -725,13 +768,14 @@ exports.deleteSlotsBulk = async (req, res) => {
     }
 };
 
-// @desc    Migriert alte Slot-Dokumente zum neuen Discriminator-Schema
+// @desc    Migriert alte Slot-Dokumente zum neuen Discriminator-Schema und zur neuen Eltern-Kind-Struktur
 // @route   POST /api/slots/migrate-to-discriminator
 exports.migrateAlteSlots = async (req, res) => {
     try {
-        console.log("Starte Migration für alte Slot-Dokumente mit direkter Methode...");
+        console.log("Starte Migration für alte Slot-Dokumente zur Eltern-Kind-Struktur...");
+        let migratedCount = 0;
 
-        // Schritt 1: Definiere ein temporäres, einfaches Schema, das die ALTEN Dokumente beschreibt.
+        // Schritt 1.1: Definiere ein temporäres, einfaches Schema, das die ALTEN Dokumente beschreibt.
         // Wichtig: KEIN discriminatorKey hier!
         const SimpleSlotSchema = new mongoose.Schema({
             Abfahrt: Object, // Wir brauchen nur die Existenz dieses Feldes für den Filter
@@ -741,11 +785,11 @@ exports.migrateAlteSlots = async (req, res) => {
             collection: 'slots' // Sage Mongoose explizit, welche Collection es verwenden soll
         });
 
-        // Schritt 2: Erstelle ein temporäres Mongoose-Modell.
+        // Schritt 1.2: Erstelle ein temporäres Mongoose-Modell.
         // Wir prüfen, ob es schon existiert, um Fehler bei schnellen wiederholten Aufrufen zu vermeiden.
         const TempSlotModel = mongoose.models.TempSlotForMigration || mongoose.model('TempSlotForMigration', SimpleSlotSchema);
 
-        // Schritt 3: Definiere Filter und Update wie zuvor.
+        // Schritt 1.3: Definiere Filter und Update wie zuvor.
         const filter = {
             slotTyp: { $exists: false },
             Abfahrt: { $exists: true }
@@ -754,21 +798,92 @@ exports.migrateAlteSlots = async (req, res) => {
             $set: { slotTyp: 'TAG' }
         };
 
-        // Schritt 4: Führe updateMany auf dem TEMPORÄREN Modell aus.
+        // Schritt 1.4: Führe updateMany auf dem TEMPORÄREN Modell aus.
         const result = await TempSlotModel.updateMany(filter, update);
 
-        console.log("Migration abgeschlossen:", result);
-
-        res.status(200).json({
-            message: 'Slot-Migration erfolgreich abgeschlossen.',
-            summary: {
-                gefundeneDokumente: result.matchedCount,
-                aktualisierteDokumente: result.modifiedCount
-            }
+        // Schritt 2: Finde alle Slots, die noch keine Eltern-Kind-Struktur haben
+        const slotsToMigrate = await Slot.find({ 
+            slotStrukturTyp: { $exists: false } 
         });
 
+        
+        if (slotsToMigrate.length === 0) {
+            console.log('Keine alten Kind-Slots zur Migration gefunden. Daten sind bereits auf dem neuesten Stand.');
+        }else{
+            console.log(`Gefunden: ${slotsToMigrate.length} alte Kind-Slots zur Migration...`);
+        }        
+
+        // Schritt 3: Iteriere durch jeden zu migrierenden Slot
+        for (const kindSlot of slotsToMigrate) {
+            // Dieser Slot wird zu einem KIND-Slot.
+            
+            // 3a. Erstelle den neuen ELTERN-Slot
+            const elternSlot = new Slot({
+                slotStrukturTyp: 'ELTERN',
+                elternSlotTyp: kindSlot.slotTyp, // Übernehme TAG oder NACHT
+                Linienbezeichnung: kindSlot.Linienbezeichnung,
+                Verkehrstag: kindSlot.Verkehrstag,
+                Kalenderwoche: kindSlot.Kalenderwoche,
+                gabelAlternativen: [kindSlot._id], // Verweise auf das Kind
+                VerweisAufTopf: kindSlot.VerweisAufTopf, // Übernehme den Verweis auf den Topf
+                Abschnitt: kindSlot.Abschnitt,
+                // Hat keine streckenspezifischen Daten wie von, bis etc.
+            });
+            await elternSlot.save(); // Speichern, um eine _id zu erhalten
+
+            // 3b. Aktualisiere den ursprünglichen Slot, um ihn zu einem KIND zu machen
+            kindSlot.slotStrukturTyp = 'KIND';
+            kindSlot.gabelElternSlot = elternSlot._id; // Verweis auf den neuen Eltern-Teil
+            const alterTopfVerweisId = kindSlot.VerweisAufTopf; // Merke dir die alte Topf-ID
+            kindSlot.VerweisAufTopf = null; // Entferne den Verweis vom Kind
+            await kindSlot.save();
+
+            // 3c. Aktualisiere den Kapazitätstopf, falls vorhanden
+            if (alterTopfVerweisId) {
+                // Ersetze die ID des KIND-Slots durch die ID des neuen ELTERN-Slots
+                await Kapazitaetstopf.updateOne(
+                    { _id: alterTopfVerweisId },
+                    { 
+                        $pull: { ListeDerSlots: kindSlot._id }, // Entferne alte Kind-ID
+                    }
+                );
+                await Kapazitaetstopf.updateOne(
+                    { _id: alterTopfVerweisId },
+                    {
+                        $addToSet: { ListeDerSlots: elternSlot._id } // Füge neue Eltern-ID hinzu
+                    }
+                );
+                // maxKapazitaet bleibt gleich, da ein Slot durch einen anderen ersetzt wird.
+            }
+            migratedCount++;
+        }
+
+        // Schritt 5: Finde alle Eltern-Slots, die noch keinen Abschnitt haben
+        const slotsAbschnitt = await Slot.find({ 
+            Abschnitt: { $exists: false } ,
+            slotStrukturTyp: 'ELTERN',
+        });
+
+        console.log(`Gefunden: ${slotsAbschnitt.length} Eltern-Slots ohne Abschnitt...`);
+
+        // Schritt 3: Iteriere durch jeden zu migrierenden Slot
+        for (const elternSlot of slotsAbschnitt) {
+            const kind = await Slot.findById(elternSlot.gabelAlternativen[0]);
+            elternSlot.Abschnitt = kind.Abschnitt;
+            await elternSlot.save();
+            migratedCount++;
+        }
+
+        res.status(200).json({
+            message: 'Migration zur Eltern-Kind-Struktur erfolgreich abgeschlossen.',
+            summary: {
+                migrierteDokumente: migratedCount,
+                gefundeneDokumente: (slotsToMigrate.length + slotsAbschnitt.length)
+            }
+        });        
+
     } catch (error) {
-        console.error('Fehler bei der Slot-Migration:', error);
+        console.error('Fehler bei der Slot-Migration zur Eltern-Kind-Struktur:', error);
         res.status(500).json({ message: 'Serverfehler bei der Migration.' });
     }
 };

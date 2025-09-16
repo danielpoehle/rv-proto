@@ -19,7 +19,12 @@ const gewuenschterSlotAbschnittSchema = new Schema({
 
 // Sub-Schema für den Status einer einzelnen Slot-Zuweisung innerhalb einer Anfrage
 const zugewiesenerSlotMitStatusSchema = new Schema({
-    slot: { // Referenz auf das Slot-Muster (definiert für eine spezifische globale relative KW)
+    slot: { // Referenz auf das Eltern-Slot-Muster (definiert für eine spezifische globale relative KW)
+        type: Schema.Types.ObjectId,
+        ref: 'Slot',
+        required: true
+    },
+    kind: { // Referenz auf das Kind-Slot-Muster (definiert für eine spezifische globale relative KW)
         type: Schema.Types.ObjectId,
         ref: 'Slot',
         required: true

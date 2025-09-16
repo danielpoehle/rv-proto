@@ -421,18 +421,27 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
         throw new Error('Zuordnung fehlgeschlagen: Nicht für alle gewünschten Abschnitte konnten passende Slots gefunden werden.');
     }
 
-    // Konvertiere das Set von String-IDs zu einem Array von ObjectId-Instanzen
+    // Konvertiere das Set von String-IDs der Kind-Slots zu einem Array von ObjectId-Instanzen
     const finaleSlotObjectIdsFuerAnfrage = Array.from(zuzuweisendeSlotIdsSet).map(idStr => new mongoose.Types.ObjectId(idStr));
 
+    // 1. Lade die vollen Kind-Slots, um an deren Eltern-Referenz zu kommen
+    const kindSlots = await Slot.find({ _id: { $in: finaleSlotObjectIdsFuerAnfrage } }).select('gabelElternSlot');
+
+    // 2. Erstelle die neue, detaillierte `ZugewieseneSlots`-Liste für die Anfrage
     // anfrage.ZugewieseneSlots mit neuer Struktur befüllen
-    anfrage.ZugewieseneSlots = finaleSlotObjectIdsFuerAnfrage.map(slotObjectId => ({
-        slot: slotObjectId, // Hier die ObjectId verwenden
+    anfrage.ZugewieseneSlots = kindSlots.map(kindSlot => ({
+        slot: kindSlot.gabelElternSlot, // Referenz auf den ELTERN-Slot
+        kind: kindSlot._id,              // Referenz auf den KIND-Slot
         statusEinzelzuweisung: 'initial_in_konfliktpruefung_topf'
     }));
     anfrage.markModified('ZugewieseneSlots');
 
     anfrage.Status = 'in_konfliktpruefung';
     anfrage.Validierungsfehler = anfrage.Validierungsfehler.filter(err => !err.startsWith("Für den Abschnitt"));
+
+    // 3. Sammle alle beteiligten Eltern- und Kind-IDs für die Aktualisierung
+    const elternSlotIds = new Set(kindSlots.map(k => k.gabelElternSlot.toString()));
+
 
     // Entgelt berechnen
     if (anfrage.ZugewieseneSlots.length > 0) {
@@ -459,15 +468,16 @@ async function fuehreAnfrageZuordnungDurch(anfrageId) {
     const gespeicherteAnfrage = await anfrage.save(); // Speichert Anfrage mit Entgelt und neuer Struktur von ZugewieseneSlots
 
     // Bidirektionale Verknüpfungen aktualisieren (Slot.zugewieseneAnfragen und Kapazitaetstopf.ListeDerAnfragen)
+    // Füge die Anfrage-ID zu ALLEN beteiligten Slots (Eltern UND Kinder) hinzu
     if (finaleSlotObjectIdsFuerAnfrage.length > 0) {
         await Slot.updateMany(
-            { _id: { $in: finaleSlotObjectIdsFuerAnfrage } },
+            { _id: { $in: [...finaleSlotObjectIdsFuerAnfrage, ...Array.from(elternSlotIds)] } },
             { $addToSet: { zugewieseneAnfragen: gespeicherteAnfrage._id } }
         );
 
-        // Kapazitätstöpfe aktualisieren
+        // Kapazitätstöpfe aktualisieren (basierend auf den Eltern-Slots)
         const slotsMitTopfReferenz = await Slot.find({ 
-            _id: { $in: finaleSlotObjectIdsFuerAnfrage },
+            _id: { $in: Array.from(elternSlotIds) },
             VerweisAufTopf: { $exists: true, $ne: null }
         }).select('VerweisAufTopf');
             

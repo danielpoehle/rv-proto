@@ -34,23 +34,33 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
     });
 
     it('sollte Kapazitätstöpfe beim Erstellen korrekt mit ihren Vorgängern und Nachfolgern verknüpfen (inkl. KW-Wechsel)', async () => {
-        // ---- SETUP: Gemeinsame Parameter für die Slots und Töpfe ----
-        const commonParams = {
-            von: "A", bis: "B", Abschnitt: "Test-Kette", Verkehrstag: "Sa+So", Grundentgelt: 100
+        // ---- SETUP: Gemeinsame Parameter für die zu erstellenden Slot-Gruppen ----
+        const commonKindData = {
+            von: "A", 
+            bis: "B", 
+            Abschnitt: "Test-Kette",
+            Grundentgelt: 100,
+            Verkehrsart: "ALLE" // Für Nacht-Slots
         };
+        const elternSlotTyp = "NACHT";
 
-        // ---- AKTION 1: Erstelle den ersten Topf (KT_A) über Slot 1 ----
+        // ---- AKTION 1: Erstelle den ersten Topf (KT_A) über eine Slot-Gruppe ----
         // Dieser Topf ist das letzte Zeitfenster in KW 2.
-        const slot1Data = {
-            ...commonParams,
-            slotTyp: 'NACHT',
+        const payload1 = {
+            elternSlotTyp,
+            Verkehrstag: "Sa+So",
             Kalenderwoche: 2,
-            Zeitfenster: '23-01',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 75,
+            Abschnitt: commonKindData.Abschnitt,
+            alternativen: [{
+                ...commonKindData,
+                Zeitfenster: '23-01',
+                Mindestfahrzeit: 60,
+                Maximalfahrzeit: 75
+            }]
         };
-        const response1 = await request(app).post('/api/slots').send(slot1Data);
+        const response1 = await request(app).post('/api/slots').send(payload1);
         expect(response1.status).toBe(201);
+        // Der Verweis auf den Topf ist jetzt am Eltern-Slot
         const topf_A_Id = response1.body.data.VerweisAufTopf;
         expect(topf_A_Id).toBeDefined();
 
@@ -62,17 +72,21 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
         expect(kt_A.TopfIDNachfolger).toBeNull();
 
 
-        // ---- AKTION 2: Erstelle den zweiten Topf (KT_B) über Slot 2 ----
-        // Dieser Topf ist das erste Zeitfenster in KW 3. Er sollte KT_A als Vorgänger erkennen.
-        const slot2Data = {
-            ...commonParams,
-            slotTyp: 'NACHT',
+        // ---- AKTION 2: Erstelle den zweiten Topf (KT_B) ----
+        // Dieser Topf ist das erste Zeitfenster in KW 3.
+        const payload2 = {
+            elternSlotTyp,
+            Verkehrstag: "Sa+So",
             Kalenderwoche: 3,
-            Zeitfenster: '01-03',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 75,
+            Abschnitt: commonKindData.Abschnitt,
+            alternativen: [{
+                ...commonKindData,
+                Zeitfenster: '01-03',
+                Mindestfahrzeit: 60,
+                Maximalfahrzeit: 75
+            }]
         };
-        const response2 = await request(app).post('/api/slots').send(slot2Data);
+        const response2 = await request(app).post('/api/slots').send(payload2);
         expect(response2.status).toBe(201);
         const topf_B_Id = response2.body.data.VerweisAufTopf;
         expect(topf_B_Id).toBeDefined();
@@ -80,33 +94,34 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
         // Überprüfung 2: KT_A und KT_B sollten jetzt verknüpft sein
         kt_A = await Kapazitaetstopf.findById(topf_A_Id);
         let kt_B = await Kapazitaetstopf.findById(topf_B_Id);
-
-        //console.log(kt_A);
-        //console.log(kt_B);
         
         expect(kt_A.TopfIDNachfolger.toString()).toBe(kt_B._id.toString());
         expect(kt_B.TopfIDVorgänger.toString()).toBe(kt_A._id.toString());
-        expect(kt_B.TopfIDNachfolger).toBeNull(); // KT_B hat noch keinen Nachfolger
+        expect(kt_B.TopfIDNachfolger).toBeNull();
 
 
-        // ---- AKTION 3: Erstelle den dritten Topf (KT_C) über Slot 3 ----
-        // Dieser Topf ist das zweite Zeitfenster in KW 3. Er sollte KT_B als Vorgänger erkennen.
-        const slot3Data = {
-            ...commonParams,
-            slotTyp: 'NACHT',
+        // ---- AKTION 3: Erstelle den dritten Topf (KT_C) ----
+        // Dieser Topf ist das zweite Zeitfenster in KW 3.
+        const payload3 = {
+            elternSlotTyp,
+            Verkehrstag: "Sa+So",
             Kalenderwoche: 3,
-            Zeitfenster: '03-05',
-            Mindestfahrzeit: 60,
-            Maximalfahrzeit: 75,
+            Abschnitt: commonKindData.Abschnitt,
+            alternativen: [{
+                ...commonKindData,
+                Zeitfenster: '03-05',
+                Mindestfahrzeit: 60,
+                Maximalfahrzeit: 75
+            }]
         };
-        const response3 = await request(app).post('/api/slots').send(slot3Data);
+        const response3 = await request(app).post('/api/slots').send(payload3);
         expect(response3.status).toBe(201);
         const topf_C_Id = response3.body.data.VerweisAufTopf;
         expect(topf_C_Id).toBeDefined();
 
         // Überprüfung 3: Alle 3 Töpfe sollten jetzt korrekt miteinander verknüpft sein
-        kt_A = await Kapazitaetstopf.findById(topf_A_Id); // Erneut laden
-        kt_B = await Kapazitaetstopf.findById(topf_B_Id); // Erneut laden
+        kt_A = await Kapazitaetstopf.findById(topf_A_Id);
+        kt_B = await Kapazitaetstopf.findById(topf_B_Id);
         let kt_C = await Kapazitaetstopf.findById(topf_C_Id);
 
         expect(kt_A.TopfIDVorgänger).toBeNull();
@@ -114,7 +129,7 @@ describe('Kapazitätstopf Vorgänger/Nachfolger Logik', () => {
         expect(kt_B.TopfIDVorgänger.toString()).toBe(kt_A._id.toString());
         expect(kt_B.TopfIDNachfolger.toString()).toBe(kt_C._id.toString());
         expect(kt_C.TopfIDVorgänger.toString()).toBe(kt_B._id.toString());
-        expect(kt_C.TopfIDNachfolger).toBeNull();      
+        expect(kt_C.TopfIDNachfolger).toBeNull();    
         
     });
 });
